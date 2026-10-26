@@ -109,6 +109,11 @@ const messages: Record<Locale, Record<string, string>> = {
     'result.downloadingAll': '正在处理全部素材…',
     'result.batchCompleted': '全部可用素材已处理完成',
     'result.batchPartial': '部分素材未成功：{items}',
+    'result.pending': '等待中',
+    'result.processing': '处理中',
+    'result.done': '已完成',
+    'result.failed': '失败',
+    'result.unavailable': '不可用',
 
 
     'mode.video': '视频',
@@ -484,6 +489,11 @@ const messages: Record<Locale, Record<string, string>> = {
     'result.downloadingAll': 'Processing all assets…',
     'result.batchCompleted': 'All available assets processed',
     'result.batchPartial': 'Some assets failed: {items}',
+    'result.pending': 'Pending',
+    'result.processing': 'Processing',
+    'result.done': 'Completed',
+    'result.failed': 'Failed',
+    'result.unavailable': 'Unavailable',
 
 
     'mode.video': 'Video',
