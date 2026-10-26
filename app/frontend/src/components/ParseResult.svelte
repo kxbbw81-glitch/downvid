@@ -3,7 +3,8 @@
   import { app } from '../lib/store.svelte'
   import { t } from '../lib/i18n.svelte'
   import { formatBytes, formatDuration } from '../lib/format'
-  import { fetchImage, saveCover, saveText } from '../lib/backend'
+  import { fetchImage, saveCover, saveText, transcribe, cancelTranscript, pickFile } from '../lib/backend'
+  import { onMount } from 'svelte'
 
   const video = $derived(app.video)
   const existing = $derived(app.alreadyDownloaded)
@@ -17,6 +18,81 @@
         ]
       : [],
   )
+
+  let whisperPath = $state('')
+  let modelPath = $state('')
+  let transcriptText = $state('')
+  let transcriptError = $state('')
+  let transcriptBusy = $state(false)
+  let transcriptTaskID = ''
+  let transcriptCopied = $state(false)
+
+  onMount(() => {
+    whisperPath = localStorage.getItem('downvid.whisperPath') || ''
+    modelPath = localStorage.getItem('downvid.modelPath') || ''
+  })
+
+  async function chooseWhisper(): Promise<void> {
+    const chosen = await pickFile(t('result.chooseEngine'), ['exe'])
+    if (chosen) {
+      whisperPath = chosen
+      localStorage.setItem('downvid.whisperPath', chosen)
+    }
+  }
+
+  async function chooseModel(): Promise<void> {
+    const chosen = await pickFile(t('result.chooseModel'), ['bin'])
+    if (chosen) {
+      modelPath = chosen
+      localStorage.setItem('downvid.modelPath', chosen)
+    }
+  }
+
+  async function startTranscript(sourceFile = ''): Promise<boolean> {
+    const current = video
+    if (!current || transcriptBusy) return false
+    if (!whisperPath || !modelPath) {
+      transcriptError = t('result.transcriptHint')
+      return false
+    }
+    transcriptBusy = true
+    transcriptError = ''
+    transcriptTaskID = 'transcript-' + Date.now().toString(36)
+    const result = await transcribe({
+      taskId: transcriptTaskID,
+      url: current.url,
+      directUrl: current.directUrl,
+      sourceFile: sourceFile || app.history.find((item) =>
+        item.url === current.url && item.mode === 'video' && item.fileExists)?.filePath,
+      outputDir: app.settings.downloadDir,
+      videoId: current.id || current.url,
+      whisperPath,
+      modelPath,
+    })
+    transcriptBusy = false
+    if (video?.url !== current.url) return result.ok
+    if (result.ok) {
+      transcriptText = result.text || ''
+      app.toast(t('result.transcriptFiles'), 'success')
+    } else {
+      transcriptError = result.error || t('error.downloadFailed')
+    }
+    return result.ok
+  }
+
+  async function stopTranscript(): Promise<void> {
+    if (transcriptTaskID) await cancelTranscript(transcriptTaskID)
+  }
+
+  async function copyTranscript(): Promise<void> {
+    if (!transcriptText) return
+    try {
+      await navigator.clipboard.writeText(transcriptText)
+      transcriptCopied = true
+    } catch {
+      app.toast(t('error.saveFailed'), 'error')
+    }
+  }
 
   let descriptionCopied = $state(false)
 
@@ -260,6 +336,39 @@
         {/if}
       {/if}
     </div>
+
+    <section class="transcript-panel" aria-label={t('result.transcript')}>
+      <div class="description-head">
+        <strong>{t('result.transcript')}</strong>
+        <div class="description-actions">
+          {#if transcriptBusy}
+            <button class="link-btn" onclick={stopTranscript}>{t('result.cancelTranscript')}</button>
+          {:else}
+            <button class="link-btn" onclick={() => startTranscript()}>{t('result.transcribe')}</button>
+          {/if}
+          <button class="link-btn" disabled={!transcriptText} onclick={copyTranscript}>
+            <Icon name="content_copy" size={14} />
+            <span>{transcriptCopied ? t('common.copied') : t('result.copyTranscript')}</span>
+          </button>
+        </div>
+      </div>
+      <p class="format-note">{t('result.transcriptHint')}</p>
+      <div class="transcript-config">
+        <button class="link-btn" onclick={chooseWhisper}>{t('result.chooseEngine')}</button>
+        <span class="num">{whisperPath || '—'}</span>
+        <button class="link-btn" onclick={chooseModel}>{t('result.chooseModel')}</button>
+        <span class="num">{modelPath || '—'}</span>
+      </div>
+      {#if transcriptBusy}
+        <p class="description-empty" role="status">{t('result.transcribing')}</p>
+      {:else if transcriptError}
+        <p class="description-empty" role="alert">{transcriptError}</p>
+      {:else if transcriptText}
+        <p class="description-content">{transcriptText}</p>
+      {:else}
+        <p class="description-empty">{t('result.noSpeech')}</p>
+      {/if}
+    </section>
 
     <footer class="result-foot">
       {#if existing}
@@ -678,6 +787,28 @@
     text-align: center;
     color: var(--color-on-surface-variant);
     font-size: 12px;
+  }
+
+  .transcript-panel {
+    margin: 0 18px 18px;
+    padding: 12px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-control);
+    background: var(--paper-sunk);
+  }
+  .transcript-config {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px 12px;
+    align-items: center;
+    margin-top: 12px;
+    font-size: 11px;
+  }
+  .transcript-config .num {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-on-surface-variant);
   }
 
   /* ---------- 底部 ---------- */
