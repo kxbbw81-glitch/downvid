@@ -135,6 +135,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'audio.bitrate': '{kbps} kbps',
     'audio.track': '音轨',
     'audio.empty': '该视频没有独立的音频格式。',
+    'audio.original': '从原视频提取完整声音（人声与背景音）',
 
     'subtitle.title': '字幕文件',
     'subtitle.auto': '自动生成',
@@ -509,6 +510,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'audio.bitrate': '{kbps} kbps',
     'audio.track': 'Audio track',
     'audio.empty': 'This video has no separate audio formats.',
+    'audio.original': 'Extract the original audio, including speech and background sound',
 
     'subtitle.title': 'Subtitle files',
     'subtitle.auto': 'Auto-generated',
