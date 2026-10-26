@@ -3,6 +3,7 @@
   import { app } from '../lib/store.svelte'
   import { t } from '../lib/i18n.svelte'
   import { formatBytes, formatDuration } from '../lib/format'
+  import { fetchImage, saveCover, saveText } from '../lib/backend'
 
   const video = $derived(app.video)
   const existing = $derived(app.alreadyDownloaded)
@@ -39,6 +40,20 @@
     descriptionCopied = true
   }
 
+  async function savePost(): Promise<void> {
+    if (!video?.description) return
+    const result = await saveText(video.description, app.settings.downloadDir, video.id || video.url, 'post')
+    app.toast(result.ok ? t('result.saved', { path: result.path || '' }) : result.error || t('error.saveFailed'), result.ok ? 'success' : 'error')
+  }
+
+  async function saveCoverFile(): Promise<void> {
+    if (!video?.thumbnail) return
+    const source = video.thumbnail
+    const dataURL = source.startsWith('data:') ? source : await fetchImage(source, video.url)
+    const result = await saveCover(dataURL, app.settings.downloadDir, video.id || video.url)
+    app.toast(result.ok ? t('result.saved', { path: result.path || '' }) : result.error || t('error.saveFailed'), result.ok ? 'success' : 'error')
+  }
+
   function toSettings(section: 'network'): void {
     app.setTab('settings')
     app.settingsSection = section
@@ -69,6 +84,10 @@
         </p>
       </div>
 
+      <button class="link-btn" disabled={!video.thumbnail} onclick={saveCoverFile}>
+        <Icon name="image" size={14} />
+        <span>{t('result.saveCover')}</span>
+      </button>
       <button class="icon-btn" onclick={() => app.clearResult()} title={t('result.clear')} aria-label={t('result.clear')}>
         <Icon name="close" size={18} />
       </button>
@@ -99,10 +118,16 @@
     <section class="description-panel" aria-label={t('result.description')}>
       <div class="description-head">
         <strong>{t('result.description')}</strong>
+        <div class="description-actions">
+          <button class="link-btn" disabled={!video.description} onclick={savePost}>
+            <Icon name="download" size={14} />
+            <span>{t('result.savePost')}</span>
+          </button>
         <button class="link-btn" disabled={!video.description} onclick={copyDescription}>
           <Icon name="content_copy" size={14} />
           <span>{descriptionCopied ? t('common.copied') : t('result.copyDescription')}</span>
         </button>
+        </div>
       </div>
       {#if video.description}
         <p class="description-content">{video.description}</p>
@@ -425,6 +450,11 @@
     gap: 12px;
     font-size: 12px;
     color: var(--ink-strong);
+  }
+  .description-actions {
+    display: flex;
+    align-items: center;
+    gap: 14px;
   }
   .description-head .link-btn:disabled {
     opacity: 0.45;
