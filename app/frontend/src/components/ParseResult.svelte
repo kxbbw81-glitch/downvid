@@ -96,6 +96,16 @@
 
   type AssetKind = 'video' | 'audio' | 'cover' | 'post' | 'transcript'
   type AssetState = 'pending' | 'processing' | 'done' | 'failed' | 'unavailable'
+  const assetKinds: AssetKind[] = ['video', 'audio', 'cover', 'post', 'transcript']
+  function statusLabel(state: AssetState): string {
+    switch (state) {
+      case 'pending': return t('result.pending')
+      case 'processing': return t('result.processing')
+      case 'done': return t('result.done')
+      case 'failed': return t('result.failed')
+      case 'unavailable': return t('result.unavailable')
+    }
+  }
   let batchBusy = $state(false)
   let batchStatus = $state<Record<AssetKind, AssetState>>({
     video: 'pending', audio: 'pending', cover: 'pending', post: 'pending', transcript: 'pending',
@@ -481,8 +491,8 @@
       </button>
       {#if batchBusy || Object.values(batchStatus).some((state) => state !== 'pending')}
         <div class="bundle-status" aria-live="polite">
-          {#each (['video', 'audio', 'cover', 'post', 'transcript'] as const) as kind}
-            <span>{kind === 'video' ? t('mode.video') : kind === 'audio' ? t('mode.audio') : kind === 'cover' ? t('result.saveCover') : kind === 'post' ? t('result.description') : t('result.transcript')}：{t('result.' + batchStatus[kind])}</span>
+          {#each assetKinds as kind}
+            <span>{kind === 'video' ? t('mode.video') : kind === 'audio' ? t('mode.audio') : kind === 'cover' ? t('result.saveCover') : kind === 'post' ? t('result.description') : t('result.transcript')}：{statusLabel(batchStatus[kind])}</span>
           {/each}
         </div>
       {/if}
