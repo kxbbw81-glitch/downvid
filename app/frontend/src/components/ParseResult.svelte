@@ -3,7 +3,7 @@
   import { app } from '../lib/store.svelte'
   import { t } from '../lib/i18n.svelte'
   import { formatBytes, formatDuration } from '../lib/format'
-  import { fetchImage, saveCover, saveText, transcribe, cancelTranscript, pickFile } from '../lib/backend'
+  import { fetchImage, saveCover, saveText, transcribe, cancelTranscript, pickFile, extractAudio } from '../lib/backend'
   import { onMount } from 'svelte'
 
   const video = $derived(app.video)
@@ -91,6 +91,108 @@
       transcriptCopied = true
     } catch {
       app.toast(t('error.saveFailed'), 'error')
+    }
+  }
+
+  type AssetKind = 'video' | 'audio' | 'cover' | 'post' | 'transcript'
+  type AssetState = 'pending' | 'processing' | 'done' | 'failed' | 'unavailable'
+  let batchBusy = $state(false)
+  let batchStatus = $state<Record<AssetKind, AssetState>>({
+    video: 'pending', audio: 'pending', cover: 'pending', post: 'pending', transcript: 'pending',
+  })
+
+  function setAssetState(kind: AssetKind, status: AssetState): void {
+    batchStatus = { ...batchStatus, [kind]: status }
+  }
+
+  async function waitForTask(taskID: string): Promise<string> {
+    const deadline = Date.now() + 30 * 60 * 1000
+    while (Date.now() < deadline) {
+      const task = app.tasks.find((item) => item.id === taskID)
+      if (!task || task.status === 'error' || task.status === 'paused') return ''
+      if (task.status === 'completed') return task.filePath
+      await new Promise<void>((resolve) => setTimeout(resolve, 500))
+    }
+    return ''
+  }
+
+  async function downloadMode(mode: 'video' | 'audio', currentURL: string): Promise<string> {
+    const prior = app.history.find((item) => item.url === currentURL && item.mode === mode && item.fileExists)
+    if (prior) return prior.filePath
+    const known = new Set(app.tasks.map((item) => item.id))
+    if (mode === 'audio' && video?.audios.length) {
+      app.selectAudio(video.audios[0].id)
+    } else {
+      app.setMode(mode)
+    }
+    await app.addDownload()
+    const task = app.tasks.find((item) => !known.has(item.id) && item.url === currentURL && item.mode === mode)
+    return task ? waitForTask(task.id) : ''
+  }
+
+  async function downloadAll(): Promise<void> {
+    const current = video
+    if (!current || batchBusy) return
+    batchBusy = true
+    batchStatus = { video: 'pending', audio: 'pending', cover: 'pending', post: 'pending', transcript: 'pending' }
+    const failures: string[] = []
+    const originalMode = app.mode
+    const assetID = current.id || current.url
+    let sourceFile = ''
+    try {
+      if (current.formats.length) {
+        setAssetState('video', 'processing')
+        sourceFile = await downloadMode('video', current.url)
+        setAssetState('video', sourceFile ? 'done' : 'failed')
+        if (!sourceFile) failures.push(t('mode.video'))
+      } else {
+        setAssetState('video', 'unavailable')
+      }
+
+      setAssetState('audio', 'processing')
+      if (sourceFile) {
+        const audio = await extractAudio(sourceFile, app.settings.downloadDir, assetID)
+        setAssetState('audio', audio.ok ? 'done' : 'failed')
+        if (!audio.ok) failures.push(t('mode.audio'))
+      } else if (current.audios.length || current.directUrl) {
+        const audioFile = await downloadMode('audio', current.url)
+        setAssetState('audio', audioFile ? 'done' : 'failed')
+        if (!audioFile) failures.push(t('mode.audio'))
+        sourceFile = audioFile
+      } else {
+        setAssetState('audio', 'unavailable')
+      }
+
+      if (current.thumbnail) {
+        setAssetState('cover', 'processing')
+        const dataURL = current.thumbnail.startsWith('data:')
+          ? current.thumbnail : await fetchImage(current.thumbnail, current.url)
+        const cover = await saveCover(dataURL, app.settings.downloadDir, assetID)
+        setAssetState('cover', cover.ok ? 'done' : 'failed')
+        if (!cover.ok) failures.push(t('result.saveCover'))
+      } else {
+        setAssetState('cover', 'unavailable')
+      }
+
+      if (current.description) {
+        setAssetState('post', 'processing')
+        const post = await saveText(current.description, app.settings.downloadDir, assetID, 'post')
+        setAssetState('post', post.ok ? 'done' : 'failed')
+        if (!post.ok) failures.push(t('result.description'))
+      } else {
+        setAssetState('post', 'unavailable')
+      }
+
+      setAssetState('transcript', 'processing')
+      const speech = await startTranscript(sourceFile)
+      setAssetState('transcript', speech ? 'done' : 'failed')
+      if (!speech) failures.push(t('result.transcript'))
+      app.toast(failures.length
+        ? t('result.batchPartial', { items: failures.join('、') })
+        : t('result.batchCompleted'), failures.length ? 'error' : 'success')
+    } finally {
+      app.setMode(originalMode)
+      batchBusy = false
     }
   }
 
@@ -371,6 +473,20 @@
         <p class="description-empty">{t('result.noSpeech')}</p>
       {/if}
     </section>
+
+    <div class="bundle-action">
+      <button class="btn btn-primary btn-lg" disabled={batchBusy} onclick={downloadAll}>
+        <Icon name="download" size={18} />
+        <span>{batchBusy ? t('result.downloadingAll') : t('result.downloadAll')}</span>
+      </button>
+      {#if batchBusy || Object.values(batchStatus).some((state) => state !== 'pending')}
+        <div class="bundle-status" aria-live="polite">
+          {#each (['video', 'audio', 'cover', 'post', 'transcript'] as const) as kind}
+            <span>{kind === 'video' ? t('mode.video') : kind === 'audio' ? t('mode.audio') : kind === 'cover' ? t('result.saveCover') : kind === 'post' ? t('result.description') : t('result.transcript')}：{t('result.' + batchStatus[kind])}</span>
+          {/each}
+        </div>
+      {/if}
+    </div>
 
     <footer class="result-foot">
       {#if existing}
@@ -810,6 +926,21 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--color-on-surface-variant);
+  }
+
+  .bundle-action {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 0 18px 16px;
+  }
+  .bundle-status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    font-size: 11px;
     color: var(--color-on-surface-variant);
   }
 
