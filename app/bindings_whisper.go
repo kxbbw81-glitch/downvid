@@ -27,10 +27,10 @@ const whisperModelURL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/ma
 const whisperModelSHA1 = "465707469ff3a37a2b9b8d8f89f2f99de7299dac"
 
 type WhisperSetup struct {
-	OK bool `json:"ok"`
+	OK          bool   `json:"ok"`
 	WhisperPath string `json:"whisperPath,omitempty"`
-	ModelPath string `json:"modelPath,omitempty"`
-	Error string `json:"error,omitempty"`
+	ModelPath   string `json:"modelPath,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 func verifiedDownload(client *http.Client, url, destination, expected string, limit int64, sha256sum bool) error {
@@ -99,6 +99,7 @@ func unpackWhisper(archive, target string) (string, error) {
 		if strings.EqualFold(filepath.Base(clean), "whisper-cli.exe") { relativeBinary = clean }
 	}
 	if relativeBinary == "" { return "", errors.New("程序包缺少 whisper-cli.exe") }
+	if err := os.RemoveAll(target); err != nil { return "", err }
 	if err := os.Rename(stage, target); err != nil { return "", err }
 	return filepath.Join(target, relativeBinary), nil
 }
