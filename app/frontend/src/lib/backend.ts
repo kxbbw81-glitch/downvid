@@ -241,6 +241,7 @@ export function toVideoInfo(info: BackendVideoInfo, url: string): VideoInfo {
     platformName: platform.name,
     host: platform.host,
     title: info.title || '未知标题',
+    description: info.description || '',
     uploader: info.uploader || '',
     duration: Math.round(info.duration || 0),
     thumbnail: info.thumbnail || '',
