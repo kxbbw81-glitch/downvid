@@ -139,6 +139,7 @@ type Bindings = {
   SaveText(content: string, outputDir: string, videoID: string, kind: string): Promise<{ ok: boolean; path?: string; error?: string }>
   Transcribe(req: TranscriptRequest): Promise<TranscriptOutcome>
   CancelTranscript(taskID: string): Promise<boolean>
+  ExtractAudio(sourceFile: string, outputDir: string, videoID: string): Promise<{ ok: boolean; path?: string; error?: string }>
   OpenPath(path: string): Promise<{ ok: boolean; error?: string }>
   ShowInFolder(path: string): Promise<{ ok: boolean; error?: string }>
   OpenExternal(url: string): Promise<{ ok: boolean; error?: string }>
@@ -314,6 +315,16 @@ export async function transcribe(req: TranscriptRequest): Promise<TranscriptOutc
 export async function cancelTranscript(taskID: string): Promise<boolean> {
   const b = await backend()
   return b ? b.CancelTranscript(taskID) : false
+}
+
+export async function extractAudio(sourceFile: string, outputDir: string, videoID: string): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const b = await backend()
+  if (!b) return { ok: false, error: '当前是浏览器预览，没有后端。' }
+  try {
+    return await b.ExtractAudio(sourceFile, outputDir, videoID)
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e) }
+  }
 }
 
 // ===== 解析 =====
