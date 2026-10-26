@@ -84,6 +84,8 @@ export interface VideoInfo {
   platformName: string
   host: string
   title: string
+  /** 作者发布的正文；与视频口播转写分开展示。 */
+  description: string
   uploader: string
   duration: number
   thumbnail: string
