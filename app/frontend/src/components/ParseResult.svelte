@@ -3,7 +3,7 @@
   import { app } from '../lib/store.svelte'
   import { t } from '../lib/i18n.svelte'
   import { formatBytes, formatDuration } from '../lib/format'
-  import { fetchImage, saveCover, saveText, transcribe, cancelTranscript, pickFile, extractAudio } from '../lib/backend'
+  import { fetchImage, saveCover, saveText, transcribe, cancelTranscript, pickFile, extractAudio, prepareWhisper } from '../lib/backend'
   import { onMount } from 'svelte'
 
   const video = $derived(app.video)
@@ -24,6 +24,7 @@
   let transcriptText = $state('')
   let transcriptError = $state('')
   let transcriptBusy = $state(false)
+  let whisperPreparing = $state(false)
   let transcriptTaskID = ''
   let transcriptCopied = $state(false)
 
@@ -51,12 +52,22 @@
   async function startTranscript(sourceFile = ''): Promise<boolean> {
     const current = video
     if (!current || transcriptBusy) return false
-    if (!whisperPath || !modelPath) {
-      transcriptError = t('result.transcriptHint')
-      return false
-    }
     transcriptBusy = true
     transcriptError = ''
+    if (!whisperPath || !modelPath) {
+      whisperPreparing = true
+      const setup = await prepareWhisper()
+      whisperPreparing = false
+      if (!setup.ok || !setup.whisperPath || !setup.modelPath) {
+        transcriptBusy = false
+        transcriptError = setup.error || t('result.transcriptHint')
+        return false
+      }
+      whisperPath = setup.whisperPath
+      modelPath = setup.modelPath
+      localStorage.setItem('downvid.whisperPath', whisperPath)
+      localStorage.setItem('downvid.modelPath', modelPath)
+    }
     transcriptTaskID = 'transcript-' + Date.now().toString(36)
     const result = await transcribe({
       taskId: transcriptTaskID,
@@ -481,7 +492,7 @@
         <span class="num">{modelPath || '—'}</span>
       </div>
       {#if transcriptBusy}
-        <p class="description-empty" role="status">{t('result.transcribing')}</p>
+        <p class="description-empty" role="status">{whisperPreparing ? t('result.preparingWhisper') : t('result.transcribing')}</p>
       {:else if transcriptError}
         <p class="description-empty" role="alert">{transcriptError}</p>
       {:else if transcriptText}
