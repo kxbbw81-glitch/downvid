@@ -135,6 +135,8 @@ type Bindings = {
   ResetSettings(): Promise<{ ok: boolean; error?: string }>
   GetDiskSpace(dir: string): Promise<{ free: number; total: number; error?: string }>
   FetchImage(url: string, referer: string): Promise<string>
+  SaveCover(dataURL: string, outputDir: string, videoID: string): Promise<{ ok: boolean; path?: string; error?: string }>
+  SaveText(content: string, outputDir: string, videoID: string, kind: string): Promise<{ ok: boolean; path?: string; error?: string }>
   OpenPath(path: string): Promise<{ ok: boolean; error?: string }>
   ShowInFolder(path: string): Promise<{ ok: boolean; error?: string }>
   OpenExternal(url: string): Promise<{ ok: boolean; error?: string }>
@@ -254,6 +256,26 @@ export function toVideoInfo(info: BackendVideoInfo, url: string): VideoInfo {
     cacheFile: info.cacheFile,
     // 直链原样带过去：后端据此决定走 yt-dlp 还是直连
     directUrl: info.directUrl,
+  }
+}
+
+export async function saveCover(dataURL: string, outputDir: string, videoID: string): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const b = await backend()
+  if (!b) return { ok: false, error: '当前是浏览器预览，没有后端。' }
+  try {
+    return await b.SaveCover(dataURL, outputDir, videoID)
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e) }
+  }
+}
+
+export async function saveText(content: string, outputDir: string, videoID: string, kind: 'post' | 'transcript'): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const b = await backend()
+  if (!b) return { ok: false, error: '当前是浏览器预览，没有后端。' }
+  try {
+    return await b.SaveText(content, outputDir, videoID, kind)
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e) }
   }
 }
 
