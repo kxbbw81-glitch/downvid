@@ -137,6 +137,8 @@ type Bindings = {
   FetchImage(url: string, referer: string): Promise<string>
   SaveCover(dataURL: string, outputDir: string, videoID: string): Promise<{ ok: boolean; path?: string; error?: string }>
   SaveText(content: string, outputDir: string, videoID: string, kind: string): Promise<{ ok: boolean; path?: string; error?: string }>
+  Transcribe(req: TranscriptRequest): Promise<TranscriptOutcome>
+  CancelTranscript(taskID: string): Promise<boolean>
   OpenPath(path: string): Promise<{ ok: boolean; error?: string }>
   ShowInFolder(path: string): Promise<{ ok: boolean; error?: string }>
   OpenExternal(url: string): Promise<{ ok: boolean; error?: string }>
@@ -278,6 +280,40 @@ export async function saveText(content: string, outputDir: string, videoID: stri
   } catch (e) {
     return { ok: false, error: String((e as Error)?.message ?? e) }
   }
+}
+
+export interface TranscriptRequest {
+  taskId: string
+  url: string
+  directUrl?: string
+  sourceFile?: string
+  outputDir: string
+  videoId: string
+  whisperPath: string
+  modelPath: string
+}
+
+export interface TranscriptOutcome {
+  ok: boolean
+  text?: string
+  txtPath?: string
+  srtPath?: string
+  error?: string
+}
+
+export async function transcribe(req: TranscriptRequest): Promise<TranscriptOutcome> {
+  const b = await backend()
+  if (!b) return { ok: false, error: '当前是浏览器预览，没有后端。' }
+  try {
+    return await b.Transcribe(req)
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e) }
+  }
+}
+
+export async function cancelTranscript(taskID: string): Promise<boolean> {
+  const b = await backend()
+  return b ? b.CancelTranscript(taskID) : false
 }
 
 // ===== 解析 =====
