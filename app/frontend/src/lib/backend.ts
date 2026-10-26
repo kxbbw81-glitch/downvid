@@ -238,6 +238,7 @@ export function toVideoInfo(info: BackendVideoInfo, url: string): VideoInfo {
   }))
 
   return {
+    id: info.id,
     url: effectiveUrl,
     platformId: platform.id,
     platformName: platform.name,
