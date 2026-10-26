@@ -38,11 +38,21 @@ func saveAsset(dir, name string, data []byte) AssetSaveResult {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return AssetSaveResult{Error: err.Error()}
 	}
-	target := filepath.Join(dir, name)
-	// 不覆盖同名素材。由上层传入稳定 ID；同一视频重复保存时保留原文件。
-	file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
-	if errors.Is(err, os.ErrExist) {
-		return AssetSaveResult{OK: true, Path: target}
+	// 保留已有文件，为重试与重新识别生成独立文件，避免把旧内容当成本次结果。
+	var target string
+	var file *os.File
+	var err error
+	for i := 0; i < 1000; i++ {
+		candidate := name
+		if i > 0 {
+			ext := filepath.Ext(name)
+			candidate = strings.TrimSuffix(name, ext) + fmt.Sprintf("-%d", i+1) + ext
+		}
+		target = filepath.Join(dir, candidate)
+		file, err = os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+		if !errors.Is(err, os.ErrExist) {
+			break
+		}
 	}
 	if err != nil {
 		return AssetSaveResult{Error: err.Error()}
