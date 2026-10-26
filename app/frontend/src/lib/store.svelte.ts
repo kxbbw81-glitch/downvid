@@ -597,7 +597,10 @@ class AppStore {
     }
     if (this.mode === 'audio') {
       const a = v.audios.find((x) => x.id === this.selectedAudioId)
-      return a ? { formatId: a.id, quality: a.label, ext: a.ext, totalBytes: a.sizeBytes, hasAudio: true } : null
+      if (a) return { formatId: a.id, quality: a.label, ext: a.ext, totalBytes: a.sizeBytes, hasAudio: true }
+      // 抖音、快手只返回视频直链；后端从该视频提取完整原声。
+      if (v.directUrl) return { formatId: 'original-audio', quality: t('mode.audio'), ext: 'm4a', totalBytes: 0, hasAudio: true }
+      return null
     }
     // 字幕：后端按 formatId 无意义，传视频格式即可（后端看 downloadMode）
     const f = v.formats.find((x) => x.id === this.selectedFormatId)
