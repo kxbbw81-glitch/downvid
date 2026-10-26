@@ -89,6 +89,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'result.clear': '清除结果',
     'result.uploader': '上传者',
     'result.duration': '时长',
+    'result.description': '发布正文',
+    'result.descriptionEmpty': '没有获取到发布正文',
+    'result.copyDescription': '复制发布正文',
 
     'mode.video': '视频',
     'mode.audio': '音频',
@@ -442,6 +445,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'result.clear': 'Clear result',
     'result.uploader': 'Uploader',
     'result.duration': 'Duration',
+    'result.description': 'Post description',
+    'result.descriptionEmpty': 'No post description available',
+    'result.copyDescription': 'Copy post description',
 
     'mode.video': 'Video',
     'mode.audio': 'Audio',
