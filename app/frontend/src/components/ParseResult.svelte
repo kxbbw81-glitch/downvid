@@ -298,6 +298,8 @@
               </button>
             {/each}
           </div>
+        {:else if video.directUrl}
+          <p class="format-note">{t('audio.original')}</p>
         {:else}
           <p class="format-empty">{t('audio.empty')}</p>
         {/if}
