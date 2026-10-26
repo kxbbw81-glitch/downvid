@@ -13,7 +13,7 @@
     video
       ? [
           { id: 'video' as const, label: t('mode.video'), icon: 'movie', count: video.formats.length },
-          { id: 'audio' as const, label: t('mode.audio'), icon: 'music_note', count: video.audios.length },
+          { id: 'audio' as const, label: t('mode.audio'), icon: 'music_note', count: video.audios.length || (video.directUrl ? 1 : 0) },
           { id: 'subtitle' as const, label: t('mode.subtitle'), icon: 'subtitles', count: video.subtitles.length },
         ]
       : [],
@@ -27,6 +27,16 @@
   let whisperPreparing = $state(false)
   let transcriptTaskID = ''
   let transcriptCopied = $state(false)
+  let previousVideoURL = ''
+  $effect(() => {
+    const nextURL = video?.url || ''
+    if (nextURL !== previousVideoURL) {
+      previousVideoURL = nextURL
+      transcriptText = ''
+      transcriptError = ''
+      transcriptCopied = false
+    }
+  })
 
   onMount(() => {
     whisperPath = localStorage.getItem('downvid.whisperPath') || ''
@@ -107,7 +117,16 @@
       await navigator.clipboard.writeText(transcriptText)
       transcriptCopied = true
     } catch {
-      app.toast(t('error.saveFailed'), 'error')
+      const field = document.createElement('textarea')
+      field.value = transcriptText
+      field.style.position = 'fixed'
+      field.style.opacity = '0'
+      document.body.appendChild(field)
+      field.select()
+      const copied = document.execCommand('copy')
+      field.remove()
+      if (copied) transcriptCopied = true
+      else app.toast(t('error.saveFailed'), 'error')
     }
   }
 
@@ -144,6 +163,7 @@
   }
 
   async function downloadMode(mode: 'video' | 'audio', currentURL: string): Promise<string> {
+    if (video?.url !== currentURL) return ''
     const prior = app.history.find((item) => item.url === currentURL && item.mode === mode && item.fileExists)
     if (prior) return prior.filePath
     const known = new Set(app.tasks.map((item) => item.id))
@@ -176,6 +196,7 @@
         setAssetState('video', 'unavailable')
       }
 
+      if (video?.url !== current.url) throw new Error('当前解析链接已经改变')
       setAssetState('audio', 'processing')
       if (sourceFile) {
         const audio = await extractAudio(sourceFile, app.settings.downloadDir, assetID)
@@ -217,6 +238,8 @@
       app.toast(failures.length
         ? t('result.batchPartial', { items: failures.join('、') })
         : t('result.batchCompleted'), failures.length ? 'error' : 'success')
+    } catch (error) {
+      app.toast(String((error as Error)?.message ?? error), 'error')
     } finally {
       app.setMode(originalMode)
       batchBusy = false
