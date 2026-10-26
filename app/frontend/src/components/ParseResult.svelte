@@ -17,6 +17,28 @@
       : [],
   )
 
+  let descriptionCopied = $state(false)
+
+  async function copyDescription(): Promise<void> {
+    const content = video?.description
+    if (!content) return
+    try {
+      await navigator.clipboard.writeText(content)
+    } catch {
+      // 部分 WebView 不开放 Clipboard API；沿用浏览器的复制命令。
+      const field = document.createElement('textarea')
+      field.value = content
+      field.style.position = 'fixed'
+      field.style.opacity = '0'
+      document.body.appendChild(field)
+      field.select()
+      const copied = document.execCommand('copy')
+      field.remove()
+      if (!copied) return
+    }
+    descriptionCopied = true
+  }
+
   function toSettings(section: 'network'): void {
     app.setTab('settings')
     app.settingsSection = section
@@ -73,6 +95,21 @@
         </button>
       </div>
     {/if}
+
+    <section class="description-panel" aria-label={t('result.description')}>
+      <div class="description-head">
+        <strong>{t('result.description')}</strong>
+        <button class="link-btn" disabled={!video.description} onclick={copyDescription}>
+          <Icon name="content_copy" size={14} />
+          <span>{descriptionCopied ? t('common.copied') : t('result.copyDescription')}</span>
+        </button>
+      </div>
+      {#if video.description}
+        <p class="description-content">{video.description}</p>
+      {:else}
+        <p class="description-empty">{t('result.descriptionEmpty')}</p>
+      {/if}
+    </section>
 
     <div class="modes" role="tablist" aria-label={t('result.eyebrow')}>
       {#each modes as mode (mode.id)}
@@ -372,6 +409,34 @@
   }
   .link-btn:hover {
     text-decoration-color: currentColor;
+  }
+
+  .description-panel {
+    margin: 0 18px 16px;
+    padding: 12px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-control);
+    background: var(--paper-sunk);
+  }
+  .description-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--ink-strong);
+  }
+  .description-head .link-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .description-content, .description-empty {
+    margin: 9px 0 0;
+    font-size: 12px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--color-on-surface-variant);
   }
 
   /* ---------- 模式切换 ---------- */
