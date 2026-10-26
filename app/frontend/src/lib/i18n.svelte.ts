@@ -92,6 +92,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'result.description': '发布正文',
     'result.descriptionEmpty': '没有获取到发布正文',
     'result.copyDescription': '复制发布正文',
+    'result.savePost': '保存正文',
+    'result.saveCover': '保存封面',
+    'result.saved': '已保存到 {path}',
 
     'mode.video': '视频',
     'mode.audio': '音频',
@@ -448,6 +451,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'result.description': 'Post description',
     'result.descriptionEmpty': 'No post description available',
     'result.copyDescription': 'Copy post description',
+    'result.savePost': 'Save post text',
+    'result.saveCover': 'Save cover',
+    'result.saved': 'Saved to {path}',
 
     'mode.video': 'Video',
     'mode.audio': 'Audio',
