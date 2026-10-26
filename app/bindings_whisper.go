@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/Downvid/downvid/app/internal/netx"
 )
@@ -51,7 +52,7 @@ func verifiedDownload(client *http.Client, url, destination, expected string, li
 	if sha256sum {
 		hasher = sha256.New()
 	}
-	n, err := io.Copy(file, io.LimitReader(res.Body, limit+1))
+	n, err := io.Copy(io.MultiWriter(file, hasher), io.LimitReader(res.Body, limit+1))
 	closeErr := file.Close()
 	if err != nil || closeErr != nil {
 		return fmt.Errorf("下载中断：%v %v", err, closeErr)
@@ -60,17 +61,7 @@ func verifiedDownload(client *http.Client, url, destination, expected string, li
 		return errors.New("下载内容超过大小上限")
 	}
 	if hex.EncodeToString(hasher.Sum(nil)) != expected {
-		// 流式读盘计算摘要，避免在内存里留一整份模型。
-		stream, openErr := os.Open(tmp)
-		if openErr != nil {
-			return openErr
-		}
-		hasher.Reset()
-		_, hashErr := io.Copy(hasher, stream)
-		_ = stream.Close()
-		if hashErr != nil || hex.EncodeToString(hasher.Sum(nil)) != expected {
-			return errors.New("下载文件校验失败")
-		}
+		return errors.New("下载文件校验失败")
 	}
 	return os.Rename(tmp, destination)
 }
@@ -81,13 +72,14 @@ func unpackWhisper(archive, target string) (string, error) {
 	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
 	if err != nil { return "", err }
 	stage := target + ".partial"
+	if err := os.RemoveAll(stage); err != nil { return "", err }
 	if err := os.MkdirAll(stage, 0755); err != nil { return "", err }
 	defer os.RemoveAll(stage)
 	relativeBinary := ""
 	for _, entry := range reader.File {
 		if entry.FileInfo().Mode()&os.ModeSymlink != 0 { continue }
 		clean := filepath.Clean(filepath.FromSlash(entry.Name))
-		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
+		if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
 			return "", errors.New("程序包包含不安全路径")
 		}
 		dest := filepath.Join(stage, clean)
@@ -120,7 +112,7 @@ func (a *App) PrepareWhisper() WhisperSetup {
 	if err := os.MkdirAll(root, 0755); err != nil { return WhisperSetup{Error: err.Error()} }
 	client, err := netx.Client(a.currentProxy(), 0)
 	if err != nil { return WhisperSetup{Error: err.Error()} }
-	client.Timeout = 0
+	client.Timeout = 15 * time.Minute
 	model := filepath.Join(root, "ggml-base.bin")
 	if !fileExists(model) {
 		if err := verifiedDownload(client, whisperModelURL, model, whisperModelSHA1, 200<<20, false); err != nil {
