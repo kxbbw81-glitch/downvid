@@ -84,6 +84,12 @@
     if (transcriptTaskID) await cancelTranscript(transcriptTaskID)
   }
 
+  async function saveEditedTranscript(): Promise<void> {
+    if (!video || !transcriptText.trim()) return
+    const result = await saveText(transcriptText, app.settings.downloadDir, video.id || video.url, 'transcript')
+    app.toast(result.ok ? t('result.saved', { path: result.path || '' }) : result.error || t('error.saveFailed'), result.ok ? 'success' : 'error')
+  }
+
   async function copyTranscript(): Promise<void> {
     if (!transcriptText) return
     try {
@@ -460,6 +466,7 @@
           {:else}
             <button class="link-btn" onclick={() => startTranscript()}>{t('result.transcribe')}</button>
           {/if}
+          <button class="link-btn" disabled={!transcriptText} onclick={saveEditedTranscript}>{t('result.saveTranscript')}</button>
           <button class="link-btn" disabled={!transcriptText} onclick={copyTranscript}>
             <Icon name="content_copy" size={14} />
             <span>{transcriptCopied ? t('common.copied') : t('result.copyTranscript')}</span>
@@ -478,7 +485,7 @@
       {:else if transcriptError}
         <p class="description-empty" role="alert">{transcriptError}</p>
       {:else if transcriptText}
-        <p class="description-content">{transcriptText}</p>
+        <textarea class="transcript-editor" bind:value={transcriptText} aria-label={t('result.transcript')}></textarea>
       {:else}
         <p class="description-empty">{t('result.noSpeech')}</p>
       {/if}
@@ -923,6 +930,21 @@
     border: 1px solid var(--rule);
     border-radius: var(--radius-control);
     background: var(--paper-sunk);
+  }
+  .transcript-editor {
+    display: block;
+    width: 100%;
+    min-height: 170px;
+    margin-top: 12px;
+    padding: 10px;
+    resize: vertical;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-control);
+    background: var(--paper-raised);
+    color: var(--ink-strong);
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.65;
   }
   .transcript-config {
     display: grid;
