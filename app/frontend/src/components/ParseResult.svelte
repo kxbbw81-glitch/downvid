@@ -64,41 +64,47 @@
     if (!current || transcriptBusy) return false
     transcriptBusy = true
     transcriptError = ''
-    if (!whisperPath || !modelPath) {
-      whisperPreparing = true
-      const setup = await prepareWhisper()
-      whisperPreparing = false
-      if (!setup.ok || !setup.whisperPath || !setup.modelPath) {
-        transcriptBusy = false
-        transcriptError = setup.error || t('result.transcriptHint')
-        return false
+    try {
+      if (!whisperPath || !modelPath) {
+        whisperPreparing = true
+        const setup = await prepareWhisper()
+        if (!setup.ok || !setup.whisperPath || !setup.modelPath) {
+          transcriptError = setup.error || t('result.transcriptHint')
+          return false
+        }
+        whisperPath = setup.whisperPath
+        modelPath = setup.modelPath
+        localStorage.setItem('downvid.whisperPath', whisperPath)
+        localStorage.setItem('downvid.modelPath', modelPath)
       }
-      whisperPath = setup.whisperPath
-      modelPath = setup.modelPath
-      localStorage.setItem('downvid.whisperPath', whisperPath)
-      localStorage.setItem('downvid.modelPath', modelPath)
+      transcriptTaskID = 'transcript-' + Date.now().toString(36)
+      const result = await transcribe({
+        taskId: transcriptTaskID,
+        url: current.url,
+        directUrl: current.directUrl,
+        sourceFile: sourceFile || app.history.find((item) =>
+          item.url === current.url && item.mode === 'video' && item.fileExists)?.filePath,
+        outputDir: app.settings.downloadDir,
+        videoId: current.id || current.url,
+        whisperPath,
+        modelPath,
+      })
+      if (video?.url !== current.url) return result.ok
+      if (result.ok) {
+        transcriptText = result.text || ''
+        app.toast(t('result.transcriptFiles'), 'success')
+      } else {
+        transcriptError = result.error || t('error.downloadFailed')
+      }
+      return result.ok
+    } catch (error) {
+      if (video?.url === current.url) transcriptError = String((error as Error)?.message ?? error)
+      return false
+    } finally {
+      whisperPreparing = false
+      transcriptBusy = false
+      transcriptTaskID = ''
     }
-    transcriptTaskID = 'transcript-' + Date.now().toString(36)
-    const result = await transcribe({
-      taskId: transcriptTaskID,
-      url: current.url,
-      directUrl: current.directUrl,
-      sourceFile: sourceFile || app.history.find((item) =>
-        item.url === current.url && item.mode === 'video' && item.fileExists)?.filePath,
-      outputDir: app.settings.downloadDir,
-      videoId: current.id || current.url,
-      whisperPath,
-      modelPath,
-    })
-    transcriptBusy = false
-    if (video?.url !== current.url) return result.ok
-    if (result.ok) {
-      transcriptText = result.text || ''
-      app.toast(t('result.transcriptFiles'), 'success')
-    } else {
-      transcriptError = result.error || t('error.downloadFailed')
-    }
-    return result.ok
   }
 
   async function stopTranscript(): Promise<void> {
