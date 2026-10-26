@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -102,4 +103,38 @@ func (a *App) SaveText(content, outputDir, videoID, kind string) AssetSaveResult
 		return AssetSaveResult{Error: "不支持的文本类型"}
 	}
 	return saveAsset(outputDir, assetName(videoID)+"-"+kind+".txt", []byte(content))
+}
+
+// ExtractAudio 从已下载的视频提取完整原声，供「全部下载」复用视频素材。
+func (a *App) ExtractAudio(sourceFile, outputDir, videoID string) AssetSaveResult {
+	if !fileExists(sourceFile) {
+		return AssetSaveResult{Error: "视频文件尚未下载完成"}
+	}
+	ffmpegPath, ok := a.pathOf("ffmpeg")
+	if !ok {
+		return AssetSaveResult{Error: "提取原声需要 FFmpeg"}
+	}
+	if outputDir == "" {
+		return AssetSaveResult{Error: "请选择下载目录"}
+	}
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return AssetSaveResult{Error: err.Error()}
+	}
+	name := assetName(videoID) + "-original-audio"
+	output := filepath.Join(outputDir, name+".m4a")
+	for i := 2; fileExists(output) && i < 1000; i++ {
+		output = filepath.Join(outputDir, fmt.Sprintf("%s-%d.m4a", name, i))
+	}
+	staging := output + ".converting.m4a"
+	defer os.Remove(staging)
+	cmd := exec.Command(ffmpegPath, "-nostdin", "-loglevel", "error",
+		"-i", sourceFile, "-vn", "-c:a", "aac", "-b:a", "192k", staging)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return AssetSaveResult{Error: fmt.Sprintf("提取原声失败：%v %s", err, strings.TrimSpace(string(out)))}
+	}
+	if err := os.Rename(staging, output); err != nil {
+		return AssetSaveResult{Error: fmt.Sprintf("保存原声失败：%v", err)}
+	}
+	return AssetSaveResult{OK: true, Path: output}
 }
