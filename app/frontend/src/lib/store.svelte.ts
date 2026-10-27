@@ -161,6 +161,8 @@ function uid(): string {
 }
 
 class AppStore {
+  // 素材处理绑定当前解析结果；完成前不允许用新链接替换它。
+  assetBusy = $state(false)
   // ===== 导航 =====
   tab = $state<Tab>('download')
   dialog = $state<Dialog>('none')
@@ -429,6 +431,7 @@ class AppStore {
    * 解析失败是预期内的常见情况（离线、限流、需要登录）。
    */
   async parse(): Promise<void> {
+    if (this.assetBusy) { this.toast(t('result.busyHint'), 'info'); return }
     if (this.parseState === 'parsing') return
 
     const raw = this.url.trim()
@@ -491,6 +494,7 @@ class AppStore {
   }
 
   clearResult(): void {
+    if (this.assetBusy) return
     this.parseState = 'idle'
     this.video = null
     this.selectedFormatId = null
@@ -600,6 +604,7 @@ class AppStore {
       if (a) return { formatId: a.id, quality: a.label, ext: a.ext, totalBytes: a.sizeBytes, hasAudio: true }
       // 抖音、快手只返回视频直链；后端从该视频提取完整原声。
       if (v.directUrl) return { formatId: 'original-audio', quality: t('mode.audio'), ext: 'm4a', totalBytes: 0, hasAudio: true }
+      if (v.formats.length) return { formatId: 'bestaudio/best', quality: t('mode.audio'), ext: 'mp3', totalBytes: 0, hasAudio: true }
       return null
     }
     // 字幕：后端按 formatId 无意义，传视频格式即可（后端看 downloadMode）
@@ -1379,6 +1384,7 @@ class AppStore {
   }
 
   get selectionSummary(): string {
+    if (this.mode === 'audio' && !this.selectedAudio) return t('audio.original')
     if (this.mode === 'video' && this.selectedFormat) {
       const f = this.selectedFormat
       return t('format.summaryVideo', { quality: f.label, ext: f.ext, size: this.formatSize(f.sizeBytes) })

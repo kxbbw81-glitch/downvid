@@ -47,6 +47,9 @@ import (
 // version 由构建期注入：-ldflags "-X main.version=1.5.0"
 var version = "0.0.0-dev"
 
+// 个人素材增强版独立分发，避免官方更新覆盖增强功能。
+var distribution = "mediaharvest"
+
 // arch 由构建期注入：-ldflags "-X main.arch=wails"
 //
 // 决定**这个二进制属于哪个架构**（electron / wails）。用途：
@@ -282,6 +285,9 @@ func (a *App) ShouldOfferIssue(kind string) bool {
 //
 // **不抛错**：全挂时 `Release` 为 nil + 轨迹，前端据此显示人话提示。
 func (a *App) CheckUpdate(source string) map[string]any {
+	if distribution == "mediaharvest" {
+		return map[string]any{"version": version, "architecture": string(update.CurrentArchitecture), "hasUpdate": false, "release": nil, "summary": "非官方素材增强版，请从 kxbbw81-glitch/downvid 下载更新"}
+	}
 	result := update.LookupLatestRelease(update.LookupOptions{
 		Source:    update.NormalizeSource(source),
 		Client:    update.DefaultHTTPClient,
@@ -327,6 +333,9 @@ func (a *App) CheckUpdate(source string) map[string]any {
 // 只做「下载 + 校验 + 记到 pending」，不安装 —— 用户可以继续手头的活，
 // 下次启动时再装（或主动点「重启并安装」）。
 func (a *App) DownloadUpdate(version string, source string) StartDownloadResult {
+	if distribution == "mediaharvest" {
+		return StartDownloadResult{Error: "素材增强版不安装官方更新，请从个人仓库下载"}
+	}
 	if version == "" {
 		return StartDownloadResult{OK: false, Error: "缺少版本号"}
 	}
@@ -415,6 +424,9 @@ func (a *App) DownloadUpdate(version string, source string) StartDownloadResult 
 // 三个平台各一套（见 internal/update/install_*.go），共同点：
 // 替换动作都在**本进程退出之后**发生，所以这里返回后必须立刻退出。
 func (a *App) InstallUpdate() StartDownloadResult {
+	if distribution == "mediaharvest" {
+		return StartDownloadResult{Error: "素材增强版不安装官方更新，请从个人仓库下载"}
+	}
 	pending := update.LoadPending(a.pendingUpdatePath())
 	if pending == nil {
 		return StartDownloadResult{OK: false, Error: "没有待安装的更新，请先下载"}
@@ -518,7 +530,10 @@ func (a *App) emit(event string, data any) {
 // `<name>` 是 package.json 的 name（`downvid`），不是显示名 `DownVid`——
 // 大小写错了同样会让数据「消失」，而这在任何测试里都看不出来。
 func resolveDataDir() string {
-	const appName = "downvid"
+	appName := "downvid"
+	if distribution == "mediaharvest" {
+		appName = "mediaharvest-wails"
+	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {

@@ -27,7 +27,7 @@ func main() {
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:     "DownVid",
+		Title:     "MediaHarvest · 视频素材提取",
 		Width:     1200,
 		Height:    900,
 		MinWidth:  880,

@@ -13,7 +13,7 @@
     video
       ? [
           { id: 'video' as const, label: t('mode.video'), icon: 'movie', count: video.formats.length },
-          { id: 'audio' as const, label: t('mode.audio'), icon: 'music_note', count: video.audios.length || (video.directUrl ? 1 : 0) },
+          { id: 'audio' as const, label: t('mode.audio'), icon: 'music_note', count: video.audios.length || (video.directUrl || video.formats.length ? 1 : 0) },
           { id: 'subtitle' as const, label: t('mode.subtitle'), icon: 'subtitles', count: video.subtitles.length },
         ]
       : [],
@@ -59,10 +59,11 @@
     }
   }
 
-  async function startTranscript(sourceFile = ''): Promise<boolean> {
+  async function startTranscript(sourceFile = '', outputDir = app.settings.downloadDir): Promise<boolean> {
     const current = video
     if (!current || transcriptBusy) return false
     transcriptBusy = true
+    app.assetBusy = true
     transcriptError = ''
     try {
       if (!whisperPath || !modelPath) {
@@ -82,9 +83,9 @@
         taskId: transcriptTaskID,
         url: current.url,
         directUrl: current.directUrl,
-        sourceFile: sourceFile || app.history.find((item) =>
-          item.url === current.url && item.mode === 'video' && item.fileExists)?.filePath,
-        outputDir: app.settings.downloadDir,
+        sourceFile: sourceFile || app.tasks.find((item) =>
+          item.url === current.url && item.mode === 'video' && item.status === 'completed')?.filePath,
+        outputDir,
         videoId: current.id || current.url,
         whisperPath,
         modelPath,
@@ -103,6 +104,7 @@
     } finally {
       whisperPreparing = false
       transcriptBusy = false
+      if (!batchBusy) app.assetBusy = false
       transcriptTaskID = ''
     }
   }
@@ -185,8 +187,10 @@
 
   async function downloadAll(): Promise<void> {
     const current = video
-    if (!current || batchBusy) return
+    if (!current || batchBusy || transcriptBusy) return
     batchBusy = true
+    app.assetBusy = true
+    const outputDir = app.settings.downloadDir
     batchStatus = { video: 'pending', audio: 'pending', cover: 'pending', post: 'pending', transcript: 'pending' }
     const failures: string[] = []
     const originalMode = app.mode
@@ -205,10 +209,10 @@
       if (video?.url !== current.url) throw new Error('当前解析链接已经改变')
       setAssetState('audio', 'processing')
       if (sourceFile) {
-        const audio = await extractAudio(sourceFile, app.settings.downloadDir, assetID)
+        const audio = await extractAudio(sourceFile, outputDir, assetID)
         setAssetState('audio', audio.ok ? 'done' : 'failed')
         if (!audio.ok) failures.push(t('mode.audio'))
-      } else if (current.audios.length || current.directUrl) {
+      } else if (current.audios.length || current.directUrl || current.formats.length) {
         const audioFile = await downloadMode('audio', current.url)
         setAssetState('audio', audioFile ? 'done' : 'failed')
         if (!audioFile) failures.push(t('mode.audio'))
@@ -221,7 +225,7 @@
         setAssetState('cover', 'processing')
         const dataURL = current.thumbnail.startsWith('data:')
           ? current.thumbnail : await fetchImage(current.thumbnail, current.url)
-        const cover = await saveCover(dataURL, app.settings.downloadDir, assetID)
+        const cover = await saveCover(dataURL, outputDir, assetID)
         setAssetState('cover', cover.ok ? 'done' : 'failed')
         if (!cover.ok) failures.push(t('result.saveCover'))
       } else {
@@ -230,7 +234,7 @@
 
       if (current.description) {
         setAssetState('post', 'processing')
-        const post = await saveText(current.description, app.settings.downloadDir, assetID, 'post')
+        const post = await saveText(current.description, outputDir, assetID, 'post')
         setAssetState('post', post.ok ? 'done' : 'failed')
         if (!post.ok) failures.push(t('result.description'))
       } else {
@@ -238,7 +242,7 @@
       }
 
       setAssetState('transcript', 'processing')
-      const speech = await startTranscript(sourceFile)
+      const speech = await startTranscript(sourceFile, outputDir)
       setAssetState('transcript', speech ? 'done' : 'failed')
       if (!speech) failures.push(t('result.transcript'))
       app.toast(failures.length
@@ -249,6 +253,7 @@
     } finally {
       app.setMode(originalMode)
       batchBusy = false
+      app.assetBusy = false
     }
   }
 
@@ -322,7 +327,7 @@
         <Icon name="image" size={14} />
         <span>{t('result.saveCover')}</span>
       </button>
-      <button class="icon-btn" onclick={() => app.clearResult()} title={t('result.clear')} aria-label={t('result.clear')}>
+      <button class="icon-btn" disabled={app.assetBusy} onclick={() => app.clearResult()} title={t('result.clear')} aria-label={t('result.clear')}>
         <Icon name="close" size={18} />
       </button>
     </header>
@@ -456,7 +461,7 @@
               </button>
             {/each}
           </div>
-        {:else if video.directUrl}
+        {:else if video.directUrl || video.formats.length}
           <p class="format-note">{t('audio.original')}</p>
         {:else}
           <p class="format-empty">{t('audio.empty')}</p>
@@ -502,9 +507,9 @@
         <strong>{t('result.transcript')}</strong>
         <div class="description-actions">
           {#if transcriptBusy}
-            <button class="link-btn" onclick={stopTranscript}>{t('result.cancelTranscript')}</button>
+            <button class="link-btn" disabled={whisperPreparing} onclick={stopTranscript}>{t('result.cancelTranscript')}</button>
           {:else}
-            <button class="link-btn" onclick={() => startTranscript()}>{t('result.transcribe')}</button>
+            <button class="link-btn" disabled={batchBusy} onclick={() => startTranscript()}>{t('result.transcribe')}</button>
           {/if}
           <button class="link-btn" disabled={!transcriptText} onclick={saveEditedTranscript}>{t('result.saveTranscript')}</button>
           <button class="link-btn" disabled={!transcriptText} onclick={copyTranscript}>
@@ -532,7 +537,7 @@
     </section>
 
     <div class="bundle-action">
-      <button class="btn btn-primary btn-lg" disabled={batchBusy} onclick={downloadAll}>
+      <button class="btn btn-primary btn-lg" disabled={batchBusy || transcriptBusy} onclick={downloadAll}>
         <Icon name="download" size={18} />
         <span>{batchBusy ? t('result.downloadingAll') : t('result.downloadAll')}</span>
       </button>

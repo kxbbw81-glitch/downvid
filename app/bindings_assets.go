@@ -2,9 +2,11 @@ package main
 
 // 解析后的封面与文本导出。所有写入均由桌面后端完成，避免 WebView 的下载权限差异。
 import (
+	"bytes"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,8 +15,8 @@ import (
 )
 
 type AssetSaveResult struct {
-	OK bool `json:"ok"`
-	Path string `json:"path,omitempty"`
+	OK    bool   `json:"ok"`
+	Path  string `json:"path,omitempty"`
 	Error string `json:"error,omitempty"`
 }
 
@@ -33,6 +35,10 @@ func assetName(s string) string {
 }
 
 func saveAsset(dir, name string, data []byte) AssetSaveResult {
+	return saveAssetReader(dir, name, bytes.NewReader(data))
+}
+
+func saveAssetReader(dir, name string, source io.Reader) AssetSaveResult {
 	if dir == "" {
 		return AssetSaveResult{Error: "请选择下载目录"}
 	}
@@ -58,7 +64,7 @@ func saveAsset(dir, name string, data []byte) AssetSaveResult {
 	if err != nil {
 		return AssetSaveResult{Error: err.Error()}
 	}
-	_, writeErr := file.Write(data)
+	_, writeErr := io.Copy(file, source)
 	closeErr := file.Close()
 	if writeErr != nil || closeErr != nil {
 		_ = os.Remove(target)
@@ -72,9 +78,9 @@ func (a *App) SaveCover(dataURL, outputDir, videoID string) AssetSaveResult {
 	const maxBytes = 8 << 20
 	typeByPrefix := map[string]string{
 		"data:image/jpeg;base64,": ".jpg",
-		"data:image/png;base64,": ".png",
+		"data:image/png;base64,":  ".png",
 		"data:image/webp;base64,": ".webp",
-		"data:image/gif;base64,": ".gif",
+		"data:image/gif;base64,":  ".gif",
 		"data:image/avif;base64,": ".avif",
 	}
 	for prefix, ext := range typeByPrefix {
@@ -120,21 +126,23 @@ func (a *App) ExtractAudio(sourceFile, outputDir, videoID string) AssetSaveResul
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return AssetSaveResult{Error: err.Error()}
 	}
-	name := assetName(videoID) + "-original-audio"
-	output := filepath.Join(outputDir, name+".m4a")
-	for i := 2; fileExists(output) && i < 1000; i++ {
-		output = filepath.Join(outputDir, fmt.Sprintf("%s-%d.m4a", name, i))
+	stage, err := os.CreateTemp(outputDir, ".original-audio-*.m4a")
+	if err != nil {
+		return AssetSaveResult{Error: err.Error()}
 	}
-	staging := output + ".converting.m4a"
+	staging := stage.Name()
+	_ = stage.Close()
 	defer os.Remove(staging)
-	cmd := exec.Command(ffmpegPath, "-nostdin", "-loglevel", "error",
+	cmd := exec.Command(ffmpegPath, "-nostdin", "-y", "-loglevel", "error",
 		"-i", sourceFile, "-vn", "-c:a", "aac", "-b:a", "192k", staging)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return AssetSaveResult{Error: fmt.Sprintf("提取原声失败：%v %s", err, strings.TrimSpace(string(out)))}
 	}
-	if err := os.Rename(staging, output); err != nil {
-		return AssetSaveResult{Error: fmt.Sprintf("保存原声失败：%v", err)}
+	file, err := os.Open(staging)
+	if err != nil {
+		return AssetSaveResult{Error: err.Error()}
 	}
-	return AssetSaveResult{OK: true, Path: output}
+	defer file.Close()
+	return saveAssetReader(outputDir, assetName(videoID)+"-original-audio.m4a", file)
 }

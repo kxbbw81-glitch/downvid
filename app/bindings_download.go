@@ -754,7 +754,13 @@ func cachedJSRuntime() jsruntime.Info {
 	return info
 }
 
-func (a *App) cookieArgs() []string { return nil }
+func (a *App) cookieArgs() []string {
+	st, err := a.settingsStore().Load()
+	if err == nil && st.CookieMode == "manual" && st.CookiesFile != "" {
+		return []string{"--cookies", st.CookiesFile}
+	}
+	return nil
+}
 
 // runSidecar 执行 Go 边车并返回 stdout。
 //

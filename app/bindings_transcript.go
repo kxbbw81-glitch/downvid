@@ -28,11 +28,11 @@ type TranscriptRequest struct {
 }
 
 type TranscriptResult struct {
-	OK       bool   `json:"ok"`
-	Text     string `json:"text,omitempty"`
-	TxtPath  string `json:"txtPath,omitempty"`
-	SrtPath  string `json:"srtPath,omitempty"`
-	Error    string `json:"error,omitempty"`
+	OK      bool   `json:"ok"`
+	Text    string `json:"text,omitempty"`
+	TxtPath string `json:"txtPath,omitempty"`
+	SrtPath string `json:"srtPath,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 var transcriptTasks = struct {
@@ -116,6 +116,7 @@ func (a *App) Transcribe(req TranscriptRequest) TranscriptResult {
 				args = append(args, "--proxy", proxy)
 			}
 			args = append(args, req.URL)
+			args = append(a.cookieArgs(), args...)
 			cmd := exec.CommandContext(ctx, ytdlp, args...)
 			raw, downloadErr := cmd.CombinedOutput()
 			if downloadErr != nil {

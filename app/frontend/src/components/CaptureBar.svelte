@@ -81,7 +81,7 @@
         <span>{t('capture.paste')}</span>
       </button>
     {/if}
-    <button type="submit" class="btn btn-primary" class:btn-lg={!compact} disabled={app.parseState === 'parsing'}>
+    <button type="submit" class="btn btn-primary" class:btn-lg={!compact} disabled={app.parseState === 'parsing' || app.assetBusy}>
       {#if app.parseState === 'parsing'}
         <Icon name="progress_activity" size={16} class="spin" />
       {:else}

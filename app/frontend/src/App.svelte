@@ -64,11 +64,14 @@
   <div class="workarea" class:with-rail={app.railOpen && app.hasTasks}>
     <main class="main">
       <div class="main-scroll scroll">
+        <!-- 保持下载页挂载，切到设置安装依赖后不会丢失台词和批量进度。 -->
+        <div class="view" style:display={app.tab === 'download' ? undefined : 'none'}>
+          <DownloadView />
+        </div>
         {#key app.tab}
+          {#if app.tab !== 'download'}
           <div class="view view-enter">
-            {#if app.tab === 'download'}
-              <DownloadView />
-            {:else if app.tab === 'history'}
+            {#if app.tab === 'history'}
               <HistoryView />
             {:else if app.tab === 'settings'}
               <SettingsView />
@@ -76,6 +79,7 @@
               <AboutView />
             {/if}
           </div>
+          {/if}
         {/key}
       </div>
     </main>

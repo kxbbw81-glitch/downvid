@@ -1,6 +1,5 @@
 <script lang="ts">
   import Icon from './Icon.svelte'
-  import logo from '../assets/logo.png'
   import { app } from '../lib/store.svelte'
   import type { Tab } from '../lib/constants'
   import { t, getLocale } from '../lib/i18n.svelte'
@@ -25,8 +24,8 @@
   style:--wails-draggable="drag"
 >
   <div class="brand">
-    <img class="brand-logo" src={logo} alt="DownVid" />
-    <span class="brand-name">DownVid</span>
+    <Icon name="video_library" size={26} />
+    <span class="brand-name" title="基于 DownVid 的非官方素材增强版">MediaHarvest</span>
   </div>
 
   <nav class="nav" aria-label="Main">

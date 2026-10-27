@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Downvid/downvid/app/internal/netx"
@@ -25,6 +26,8 @@ const whisperArchiveURL = "https://github.com/ggml-org/whisper.cpp/releases/down
 const whisperArchiveSHA256 = "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb"
 const whisperModelURL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
 const whisperModelSHA1 = "465707469ff3a37a2b9b8d8f89f2f99de7299dac"
+
+var whisperInstallMu sync.Mutex
 
 type WhisperSetup struct {
 	OK          bool   `json:"ok"`
@@ -68,51 +71,89 @@ func verifiedDownload(client *http.Client, url, destination, expected string, li
 
 func unpackWhisper(archive, target string) (string, error) {
 	raw, err := os.ReadFile(archive)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	stage := target + ".partial"
-	if err := os.RemoveAll(stage); err != nil { return "", err }
-	if err := os.MkdirAll(stage, 0755); err != nil { return "", err }
+	if err := os.RemoveAll(stage); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(stage, 0755); err != nil {
+		return "", err
+	}
 	defer os.RemoveAll(stage)
 	relativeBinary := ""
 	for _, entry := range reader.File {
-		if entry.FileInfo().Mode()&os.ModeSymlink != 0 { continue }
+		if entry.FileInfo().Mode()&os.ModeSymlink != 0 {
+			continue
+		}
 		clean := filepath.Clean(filepath.FromSlash(entry.Name))
 		if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
 			return "", errors.New("程序包包含不安全路径")
 		}
 		dest := filepath.Join(stage, clean)
-		if entry.FileInfo().IsDir() { if err := os.MkdirAll(dest, 0755); err != nil { return "", err }; continue }
-		if entry.UncompressedSize64 > 100<<20 { return "", errors.New("程序包文件过大") }
-		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil { return "", err }
+		if entry.FileInfo().IsDir() {
+			if err := os.MkdirAll(dest, 0755); err != nil {
+				return "", err
+			}
+			continue
+		}
+		if entry.UncompressedSize64 > 100<<20 {
+			return "", errors.New("程序包文件过大")
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			return "", err
+		}
 		rc, err := entry.Open()
-		if err != nil { return "", err }
+		if err != nil {
+			return "", err
+		}
 		out, err := os.OpenFile(dest, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0755)
-		if err != nil { _ = rc.Close(); return "", err }
+		if err != nil {
+			_ = rc.Close()
+			return "", err
+		}
 		n, copyErr := io.Copy(out, io.LimitReader(rc, 100<<20+1))
 		_ = rc.Close()
 		closeErr := out.Close()
 		if copyErr != nil || closeErr != nil || n > 100<<20 {
 			return "", errors.New("解压程序包失败")
 		}
-		if strings.EqualFold(filepath.Base(clean), "whisper-cli.exe") { relativeBinary = clean }
+		if strings.EqualFold(filepath.Base(clean), "whisper-cli.exe") {
+			relativeBinary = clean
+		}
 	}
-	if relativeBinary == "" { return "", errors.New("程序包缺少 whisper-cli.exe") }
-	if err := os.RemoveAll(target); err != nil { return "", err }
-	if err := os.Rename(stage, target); err != nil { return "", err }
+	if relativeBinary == "" {
+		return "", errors.New("程序包缺少 whisper-cli.exe")
+	}
+	if err := os.RemoveAll(target); err != nil {
+		return "", err
+	}
+	if err := os.Rename(stage, target); err != nil {
+		return "", err
+	}
 	return filepath.Join(target, relativeBinary), nil
 }
 
 // PrepareWhisper 首次使用时安装经校验的本地转写依赖。
 func (a *App) PrepareWhisper() WhisperSetup {
+	whisperInstallMu.Lock()
+	defer whisperInstallMu.Unlock()
 	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
 		return WhisperSetup{Error: "当前平台请手动选择 whisper-cli 和多语言 ggml 模型"}
 	}
 	root := filepath.Join(a.dataDir, "runtime", "whisper")
-	if err := os.MkdirAll(root, 0755); err != nil { return WhisperSetup{Error: err.Error()} }
+	if err := os.MkdirAll(root, 0755); err != nil {
+		return WhisperSetup{Error: err.Error()}
+	}
 	client, err := netx.Client(a.currentProxy(), 0)
-	if err != nil { return WhisperSetup{Error: err.Error()} }
+	if err != nil {
+		return WhisperSetup{Error: err.Error()}
+	}
 	client.Timeout = 15 * time.Minute
 	model := filepath.Join(root, "ggml-base.bin")
 	if !fileExists(model) {
@@ -137,7 +178,9 @@ func (a *App) PrepareWhisper() WhisperSetup {
 			}
 		}
 		binary, err = unpackWhisper(archive, binDir)
-		if err != nil { return WhisperSetup{Error: "安装识别程序失败：" + err.Error()} }
+		if err != nil {
+			return WhisperSetup{Error: "安装识别程序失败：" + err.Error()}
+		}
 	}
 	return WhisperSetup{OK: true, WhisperPath: binary, ModelPath: model}
 }
