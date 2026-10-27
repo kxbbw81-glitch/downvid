@@ -135,6 +135,12 @@ type Bindings = {
   ResetSettings(): Promise<{ ok: boolean; error?: string }>
   GetDiskSpace(dir: string): Promise<{ free: number; total: number; error?: string }>
   FetchImage(url: string, referer: string): Promise<string>
+  SaveCover(dataURL: string, outputDir: string, videoID: string): Promise<{ ok: boolean; path?: string; error?: string }>
+  SaveText(content: string, outputDir: string, videoID: string, kind: string): Promise<{ ok: boolean; path?: string; error?: string }>
+  Transcribe(req: TranscriptRequest): Promise<TranscriptOutcome>
+  CancelTranscript(taskID: string): Promise<boolean>
+  ExtractAudio(sourceFile: string, outputDir: string, videoID: string): Promise<{ ok: boolean; path?: string; error?: string }>
+  PrepareWhisper(taskID: string): Promise<{ ok: boolean; whisperPath?: string; modelPath?: string; error?: string }>
   OpenPath(path: string): Promise<{ ok: boolean; error?: string }>
   ShowInFolder(path: string): Promise<{ ok: boolean; error?: string }>
   OpenExternal(url: string): Promise<{ ok: boolean; error?: string }>
@@ -236,11 +242,13 @@ export function toVideoInfo(info: BackendVideoInfo, url: string): VideoInfo {
   }))
 
   return {
+    id: info.id,
     url: effectiveUrl,
     platformId: platform.id,
     platformName: platform.name,
     host: platform.host,
     title: info.title || '未知标题',
+    description: info.description || '',
     uploader: info.uploader || '',
     duration: Math.round(info.duration || 0),
     thumbnail: info.thumbnail || '',
@@ -253,6 +261,80 @@ export function toVideoInfo(info: BackendVideoInfo, url: string): VideoInfo {
     cacheFile: info.cacheFile,
     // 直链原样带过去：后端据此决定走 yt-dlp 还是直连
     directUrl: info.directUrl,
+  }
+}
+
+export async function saveCover(dataURL: string, outputDir: string, videoID: string): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const b = await backend()
+  if (!b) return { ok: false, error: '当前是浏览器预览，没有后端。' }
+  try {
+    return await b.SaveCover(dataURL, outputDir, videoID)
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e) }
+  }
+}
+
+export async function saveText(content: string, outputDir: string, videoID: string, kind: 'post' | 'transcript'): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const b = await backend()
+  if (!b) return { ok: false, error: '当前是浏览器预览，没有后端。' }
+  try {
+    return await b.SaveText(content, outputDir, videoID, kind)
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e) }
+  }
+}
+
+export interface TranscriptRequest {
+  taskId: string
+  url: string
+  directUrl?: string
+  sourceFile?: string
+  outputDir: string
+  videoId: string
+  whisperPath: string
+  modelPath: string
+}
+
+export interface TranscriptOutcome {
+  ok: boolean
+  text?: string
+  txtPath?: string
+  srtPath?: string
+  error?: string
+}
+
+export async function transcribe(req: TranscriptRequest): Promise<TranscriptOutcome> {
+  const b = await backend()
+  if (!b) return { ok: false, error: '当前是浏览器预览，没有后端。' }
+  try {
+    return await b.Transcribe(req)
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e) }
+  }
+}
+
+export async function cancelTranscript(taskID: string): Promise<boolean> {
+  const b = await backend()
+  return b ? b.CancelTranscript(taskID) : false
+}
+
+export async function extractAudio(sourceFile: string, outputDir: string, videoID: string): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const b = await backend()
+  if (!b) return { ok: false, error: '当前是浏览器预览，没有后端。' }
+  try {
+    return await b.ExtractAudio(sourceFile, outputDir, videoID)
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e) }
+  }
+}
+
+export async function prepareWhisper(taskID: string): Promise<{ ok: boolean; whisperPath?: string; modelPath?: string; error?: string }> {
+  const b = await backend()
+  if (!b) return { ok: false, error: '当前是浏览器预览，没有后端。' }
+  try {
+    return await b.PrepareWhisper(taskID)
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e) }
   }
 }
 

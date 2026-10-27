@@ -26,8 +26,8 @@ const root = process.cwd()
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'downvid-runtime-'))
 const fixture = path.join(temp, 'fixture.exe')
 const sidecar = path.join(temp, 'downvid-deps.exe')
-function build(output, source) {
-  const run = spawnSync('go', ['build', '-o', output, source], {
+function build(output, source, extra = []) {
+  const run = spawnSync('go', ['build', ...extra, '-o', output, source], {
     cwd: path.join(root, 'backend'), encoding: 'utf8', windowsHide: true,
   })
   assert.equal(run.status, 0, run.error?.message || run.stderr)
@@ -90,7 +90,11 @@ function tsTranspiledModule(file) {
 const entry = (results, kind) => results.find(item => item.kind === kind)
 
 try {
-  build(fixture, path.join(root, 'scripts', 'fixtures', 'runtime-tool.go'))
+  // 夹具版本随当前清单注入，避免升级下载器后把正常测试程序判为过旧。
+  const manifest = fs.readFileSync(path.join(root, 'backend/internal/manifest/assets.gen.go'), 'utf8')
+  const ytdlpVersion = manifest.match(/const YtDlpTag = "([^"]+)"/)?.[1]
+  assert.ok(ytdlpVersion, '清单中缺少 yt-dlp 版本')
+  build(fixture, path.join(root, 'scripts', 'fixtures', 'runtime-tool.go'), ['-ldflags', `-X main.ytdlpVersion=${ytdlpVersion}`])
   build(sidecar, './cmd/downvid-deps')
   check('managed', home => {
     const expected = binary(path.join(home, 'managed'), 'yt-dlp')

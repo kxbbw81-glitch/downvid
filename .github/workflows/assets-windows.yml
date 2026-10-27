@@ -1,0 +1,87 @@
+name: 素材完整版 Windows 验收
+on:
+  push:
+    branches: [feat/asset-transcript-workflow]
+    paths: ['app/**', 'backend/**', 'scripts/**', '.github/workflows/assets-windows.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: assets-windows-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: app/go.mod
+          cache: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v6
+      - name: 安装独立前端
+        working-directory: app/frontend
+        run: pnpm install --frozen-lockfile
+      - name: 安装 Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
+      - name: 生成绑定
+        shell: bash
+        run: |
+          bash app/scripts/prepare-embed-dir.sh
+          cd app
+          wails generate module
+      - name: 前端检查与测试
+        working-directory: app/frontend
+        run: |
+          pnpm check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          pnpm test
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          pnpm build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Go 检查与测试
+        working-directory: app
+        shell: pwsh
+        run: |
+          $files = @(gofmt -l bindings_assets.go bindings_assets_test.go bindings_transcript.go bindings_whisper.go bindings_download.go)
+          if ($files.Count) { throw ($files -join ', ') }
+          go vet ./...
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          go test -shuffle=on -count=1 ./...
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: 安装真实音频测试依赖
+        shell: pwsh
+        run: |
+          $runtimeDir = Join-Path $env:RUNNER_TEMP 'assets-runtime'
+          Push-Location backend
+          go run ./cmd/downvid-deps fetch --managed-dir $runtimeDir --only ffmpeg --mirror github
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Pop-Location
+          $ffmpeg = Get-ChildItem $runtimeDir -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $ffmpeg) { throw 'FFmpeg 安装未产生可执行文件' }
+          "DOWNVID_FFMPEG=$($ffmpeg.FullName)" >> $env:GITHUB_ENV
+      - name: 真实媒体与首次安装集成验收
+        working-directory: app
+        env:
+          DOWNVID_ASSET_INTEGRATION: '1'
+        run: go test -run TestAssetsRealMediaIntegration -count=1 -v -timeout 15m .
+      - name: 构建完整桌面程序
+        shell: bash
+        run: bash app/scripts/build.sh -platform windows/amd64
+      - name: 整理独立程序包
+        shell: pwsh
+        run: |
+          Move-Item -LiteralPath app/build/bin/downvid.exe -Destination app/build/bin/MediaHarvest.exe
+          Copy-Item -LiteralPath docs/asset-transcript-workflow.md -Destination app/build/bin/README.md
+      - name: 保存测试安装产物
+        # 产物包含独立程序及首次使用说明，不会发布 Release。
+        uses: actions/upload-artifact@v6
+        with:
+          name: MediaHarvest-Wails-Windows-x64
+          path: app/build/bin/*
+          if-no-files-found: error
+          retention-days: 14

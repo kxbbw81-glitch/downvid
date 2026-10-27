@@ -2,6 +2,7 @@ package download
 
 import (
 	"math"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -157,7 +158,8 @@ func TestParseLineFile(t *testing.T) {
 	if ev.Kind != "file" {
 		t.Fatalf("Kind = %q", ev.Kind)
 	}
-	if ev.FilePath != "/tmp/out/video.mp4" {
+	expected, _ := filepath.Abs("/tmp/out/video.mp4")
+	if ev.FilePath != expected {
 		t.Errorf("FilePath = %q", ev.FilePath)
 	}
 }
@@ -168,7 +170,8 @@ func TestParseLineSubs(t *testing.T) {
 
 	// 优先取用户要的语言
 	ev := ParseLine("[dvsubs]"+body, st, []string{"en"})
-	if ev.FilePath != "/tmp/out/v.en.srt" {
+	expected, _ := filepath.Abs("/tmp/out/v.en.srt")
+	if ev.FilePath != expected {
 		t.Errorf("应优先 en，got %q", ev.FilePath)
 	}
 

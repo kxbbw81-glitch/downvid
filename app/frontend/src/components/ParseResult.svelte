@@ -3,6 +3,8 @@
   import { app } from '../lib/store.svelte'
   import { t } from '../lib/i18n.svelte'
   import { formatBytes, formatDuration } from '../lib/format'
+  import { fetchImage, saveCover, saveText, transcribe, cancelTranscript, pickFile, extractAudio, prepareWhisper } from '../lib/backend'
+  import { onMount } from 'svelte'
 
   const video = $derived(app.video)
   const existing = $derived(app.alreadyDownloaded)
@@ -11,11 +13,320 @@
     video
       ? [
           { id: 'video' as const, label: t('mode.video'), icon: 'movie', count: video.formats.length },
-          { id: 'audio' as const, label: t('mode.audio'), icon: 'music_note', count: video.audios.length },
+          { id: 'audio' as const, label: t('mode.audio'), icon: 'music_note', count: video.audios.length || (video.directUrl || video.formats.length ? 1 : 0) },
           { id: 'subtitle' as const, label: t('mode.subtitle'), icon: 'subtitles', count: video.subtitles.length },
         ]
       : [],
   )
+
+  let whisperPath = $state('')
+  let modelPath = $state('')
+  let transcriptText = $state('')
+  let transcriptError = $state('')
+  let transcriptBusy = $state(false)
+  let whisperPreparing = $state(false)
+  let transcriptTaskID = ''
+  let transcriptCancelled = false
+  let transcriptCopied = $state(false)
+  let previousVideoURL = ''
+  $effect(() => {
+    const nextURL = video?.url || ''
+    if (nextURL !== previousVideoURL) {
+      previousVideoURL = nextURL
+      transcriptText = ''
+      transcriptError = ''
+      transcriptCopied = false
+    }
+  })
+
+  onMount(() => {
+    whisperPath = localStorage.getItem('downvid.whisperPath') || ''
+    modelPath = localStorage.getItem('downvid.modelPath') || ''
+  })
+
+  async function chooseWhisper(): Promise<void> {
+    const chosen = await pickFile(t('result.chooseEngine'), ['exe'])
+    if (chosen) {
+      whisperPath = chosen
+      localStorage.setItem('downvid.whisperPath', chosen)
+    }
+  }
+
+  async function chooseModel(): Promise<void> {
+    const chosen = await pickFile(t('result.chooseModel'), ['bin'])
+    if (chosen) {
+      modelPath = chosen
+      localStorage.setItem('downvid.modelPath', chosen)
+    }
+  }
+
+  async function startTranscript(sourceFile = '', outputDir = app.settings.downloadDir): Promise<boolean> {
+    const current = video
+    if (!current || transcriptBusy) return false
+    transcriptBusy = true
+    app.assetBusy = true
+    transcriptError = ''
+    transcriptCancelled = false
+    transcriptTaskID = 'transcript-' + Date.now().toString(36)
+    try {
+      if (!whisperPath || !modelPath) {
+        whisperPreparing = true
+        const setup = await prepareWhisper(transcriptTaskID)
+        if (transcriptCancelled) return false
+        if (!setup.ok || !setup.whisperPath || !setup.modelPath) {
+          transcriptError = setup.error || t('result.transcriptHint')
+          return false
+        }
+        whisperPath = setup.whisperPath
+        modelPath = setup.modelPath
+        localStorage.setItem('downvid.whisperPath', whisperPath)
+        localStorage.setItem('downvid.modelPath', modelPath)
+      }
+      if (transcriptCancelled) return false
+      whisperPreparing = false
+      const result = await transcribe({
+        taskId: transcriptTaskID,
+        url: current.url,
+        directUrl: current.directUrl,
+        sourceFile: sourceFile || app.tasks.find((item) =>
+          item.url === current.url && item.mode === 'video' && item.status === 'completed')?.filePath,
+        outputDir,
+        videoId: current.id || current.url,
+        whisperPath,
+        modelPath,
+      })
+      if (video?.url !== current.url) return result.ok
+      if (result.ok) {
+        transcriptText = result.text || ''
+        app.toast(t('result.transcriptFiles'), 'success')
+      } else {
+        transcriptError = result.error || t('error.downloadFailed')
+      }
+      return result.ok
+    } catch (error) {
+      if (video?.url === current.url) transcriptError = String((error as Error)?.message ?? error)
+      return false
+    } finally {
+      whisperPreparing = false
+      transcriptBusy = false
+      if (!batchBusy) app.assetBusy = false
+      transcriptTaskID = ''
+    }
+  }
+
+  async function stopTranscript(): Promise<void> {
+    transcriptCancelled = true
+    transcriptError = t('result.transcriptCancelled')
+    if (transcriptTaskID) await cancelTranscript(transcriptTaskID)
+  }
+
+  async function saveEditedTranscript(): Promise<void> {
+    if (!video || !transcriptText.trim()) return
+    const result = await saveText(transcriptText, app.settings.downloadDir, video.id || video.url, 'transcript')
+    app.toast(result.ok ? t('result.saved', { path: result.path || '' }) : result.error || t('error.saveFailed'), result.ok ? 'success' : 'error')
+  }
+
+  async function copyTranscript(): Promise<void> {
+    if (!transcriptText) return
+    try {
+      await navigator.clipboard.writeText(transcriptText)
+      transcriptCopied = true
+    } catch {
+      const field = document.createElement('textarea')
+      field.value = transcriptText
+      field.style.position = 'fixed'
+      field.style.opacity = '0'
+      document.body.appendChild(field)
+      field.select()
+      const copied = document.execCommand('copy')
+      field.remove()
+      if (copied) transcriptCopied = true
+      else app.toast(t('error.saveFailed'), 'error')
+    }
+  }
+
+  type AssetKind = 'video' | 'audio' | 'cover' | 'post' | 'transcript'
+  type AssetState = 'pending' | 'processing' | 'done' | 'failed' | 'unavailable'
+  const assetKinds: AssetKind[] = ['video', 'audio', 'cover', 'post', 'transcript']
+  function statusLabel(state: AssetState): string {
+    switch (state) {
+      case 'pending': return t('result.pending')
+      case 'processing': return t('result.processing')
+      case 'done': return t('result.done')
+      case 'failed': return t('result.failed')
+      case 'unavailable': return t('result.unavailable')
+    }
+  }
+  let batchBusy = $state(false)
+  let batchStatus = $state<Record<AssetKind, AssetState>>({
+    video: 'pending', audio: 'pending', cover: 'pending', post: 'pending', transcript: 'pending',
+  })
+
+  function setAssetState(kind: AssetKind, status: AssetState): void {
+    batchStatus = { ...batchStatus, [kind]: status }
+  }
+
+  async function waitForTask(taskID: string): Promise<string> {
+    const deadline = Date.now() + 30 * 60 * 1000
+    while (Date.now() < deadline) {
+      const task = app.tasks.find((item) => item.id === taskID)
+      if (!task || task.status === 'error' || task.status === 'paused') return ''
+      if (task.status === 'completed') return task.filePath
+      await new Promise<void>((resolve) => setTimeout(resolve, 500))
+    }
+    return ''
+  }
+
+  async function downloadMode(mode: 'video' | 'audio', currentURL: string): Promise<string> {
+    if (video?.url !== currentURL) return ''
+    const known = new Set(app.tasks.map((item) => item.id))
+    if (mode === 'audio' && video?.audios.length) {
+      app.selectAudio(video.audios[0].id)
+    } else {
+      app.setMode(mode)
+    }
+    // 历史接口没有保存 mode；不要把音频历史误当成已下载的视频。
+    const prior = app.tasks.find((item) => item.url === currentURL && item.mode === mode && item.status === 'completed'
+      && (mode !== 'video' || item.formatId === app.selectedFormatId))
+    if (prior) return prior.filePath
+    if (mode === 'video' && app.alreadyDownloaded) return app.alreadyDownloaded.filePath
+    await app.addDownload()
+    const task = app.tasks.find((item) => !known.has(item.id) && item.url === currentURL && item.mode === mode)
+    return task ? waitForTask(task.id) : ''
+  }
+
+  async function downloadAll(only?: AssetKind): Promise<void> {
+    const current = video
+    if (!current || batchBusy || transcriptBusy) return
+    batchBusy = true
+    app.assetBusy = true
+    const outputDir = app.settings.downloadDir
+    if (!only) batchStatus = { video: 'pending', audio: 'pending', cover: 'pending', post: 'pending', transcript: 'pending' }
+    const failures: string[] = []
+    const originalMode = app.mode
+    const assetID = current.id || current.url
+    let sourceFile = app.tasks.find((item) => item.url === current.url && item.mode === 'video' && item.status === 'completed')?.filePath || ''
+    try {
+      if (!only || only === 'video') {
+      if (current.formats.length) {
+        setAssetState('video', 'processing')
+        sourceFile = await downloadMode('video', current.url)
+        setAssetState('video', sourceFile ? 'done' : 'failed')
+        if (!sourceFile) failures.push(t('mode.video'))
+      } else {
+        setAssetState('video', 'unavailable')
+      }
+      }
+
+      if (video?.url !== current.url) throw new Error('当前解析链接已经改变')
+      if (!only || only === 'audio') {
+      setAssetState('audio', 'processing')
+      if (sourceFile) {
+        const audio = await extractAudio(sourceFile, outputDir, assetID)
+        setAssetState('audio', audio.ok ? 'done' : 'failed')
+        if (!audio.ok) failures.push(t('mode.audio'))
+      } else if (current.audios.length || current.directUrl || current.formats.length) {
+        const audioFile = await downloadMode('audio', current.url)
+        setAssetState('audio', audioFile ? 'done' : 'failed')
+        if (!audioFile) failures.push(t('mode.audio'))
+        sourceFile = audioFile
+      } else {
+        setAssetState('audio', 'unavailable')
+      }
+      }
+
+      if (!only || only === 'cover') {
+      if (current.thumbnail) {
+        setAssetState('cover', 'processing')
+        const dataURL = current.thumbnail.startsWith('data:')
+          ? current.thumbnail : await fetchImage(current.thumbnail, current.url)
+        const cover = await saveCover(dataURL, outputDir, assetID)
+        setAssetState('cover', cover.ok ? 'done' : 'failed')
+        if (!cover.ok) failures.push(t('result.saveCover'))
+      } else {
+        setAssetState('cover', 'unavailable')
+      }
+      }
+
+      if (!only || only === 'post') {
+      if (current.description) {
+        setAssetState('post', 'processing')
+        const post = await saveText(current.description, outputDir, assetID, 'post')
+        setAssetState('post', post.ok ? 'done' : 'failed')
+        if (!post.ok) failures.push(t('result.description'))
+      } else {
+        setAssetState('post', 'unavailable')
+      }
+      }
+
+      if (!only || only === 'transcript') {
+      setAssetState('transcript', 'processing')
+      const speech = await startTranscript(sourceFile, outputDir)
+      setAssetState('transcript', speech ? 'done' : 'failed')
+      if (!speech) failures.push(t('result.transcript'))
+      }
+      app.toast(failures.length
+        ? t('result.batchPartial', { items: failures.join('、') })
+        : t('result.batchCompleted'), failures.length ? 'error' : 'success')
+    } catch (error) {
+      app.toast(String((error as Error)?.message ?? error), 'error')
+    } finally {
+      app.setMode(originalMode)
+      batchBusy = false
+      app.assetBusy = false
+    }
+  }
+
+  let descriptionCopied = $state(false)
+
+  async function copyDescription(): Promise<void> {
+    const content = video?.description
+    if (!content) return
+    try {
+      await navigator.clipboard.writeText(content)
+    } catch {
+      // 部分 WebView 不开放 Clipboard API；沿用浏览器的复制命令。
+      const field = document.createElement('textarea')
+      field.value = content
+      field.style.position = 'fixed'
+      field.style.opacity = '0'
+      document.body.appendChild(field)
+      field.select()
+      const copied = document.execCommand('copy')
+      field.remove()
+      if (!copied) return
+    }
+    descriptionCopied = true
+  }
+
+  async function savePost(): Promise<void> {
+    if (!video?.description) return
+    const result = await saveText(video.description, app.settings.downloadDir, video.id || video.url, 'post')
+    app.toast(result.ok ? t('result.saved', { path: result.path || '' }) : result.error || t('error.saveFailed'), result.ok ? 'success' : 'error')
+  }
+
+  async function saveCoverFile(): Promise<void> {
+    if (!video?.thumbnail) return
+    const source = video.thumbnail
+    const dataURL = source.startsWith('data:') ? source : await fetchImage(source, video.url)
+    const result = await saveCover(dataURL, app.settings.downloadDir, video.id || video.url)
+    app.toast(result.ok ? t('result.saved', { path: result.path || '' }) : result.error || t('error.saveFailed'), result.ok ? 'success' : 'error')
+  }
+
+  async function downloadSelected(): Promise<void> {
+    if (!video || app.assetBusy) return
+    const source = app.mode === 'audio' ? app.tasks.find((item) =>
+      item.url === video?.url && item.mode === 'video' && item.status === 'completed')?.filePath : ''
+    if (!source) { await app.addDownload(); return }
+    const current = video
+    const outputDir = app.settings.downloadDir
+    app.assetBusy = true
+    try {
+      const result = await extractAudio(source, outputDir, current.id || current.url)
+      setAssetState('audio', result.ok ? 'done' : 'failed')
+      app.toast(result.ok ? t('result.saved', { path: result.path || '' }) : result.error || t('error.saveFailed'), result.ok ? 'success' : 'error')
+    } finally { app.assetBusy = false }
+  }
 
   function toSettings(section: 'network'): void {
     app.setTab('settings')
@@ -47,7 +358,11 @@
         </p>
       </div>
 
-      <button class="icon-btn" onclick={() => app.clearResult()} title={t('result.clear')} aria-label={t('result.clear')}>
+      <button class="link-btn" disabled={!video.thumbnail} onclick={saveCoverFile}>
+        <Icon name="image" size={14} />
+        <span>{t('result.saveCover')}</span>
+      </button>
+      <button class="icon-btn" disabled={app.assetBusy} onclick={() => app.clearResult()} title={t('result.clear')} aria-label={t('result.clear')}>
         <Icon name="close" size={18} />
       </button>
     </header>
@@ -73,6 +388,27 @@
         </button>
       </div>
     {/if}
+
+    <section class="description-panel" aria-label={t('result.description')}>
+      <div class="description-head">
+        <strong>{t('result.description')}</strong>
+        <div class="description-actions">
+          <button class="link-btn" disabled={!video.description} onclick={savePost}>
+            <Icon name="download" size={14} />
+            <span>{t('result.savePost')}</span>
+          </button>
+        <button class="link-btn" disabled={!video.description} onclick={copyDescription}>
+          <Icon name="content_copy" size={14} />
+          <span>{descriptionCopied ? t('common.copied') : t('result.copyDescription')}</span>
+        </button>
+        </div>
+      </div>
+      {#if video.description}
+        <p class="description-content">{video.description}</p>
+      {:else}
+        <p class="description-empty">{t('result.descriptionEmpty')}</p>
+      {/if}
+    </section>
 
     <div class="modes" role="tablist" aria-label={t('result.eyebrow')}>
       {#each modes as mode (mode.id)}
@@ -160,6 +496,8 @@
               </button>
             {/each}
           </div>
+        {:else if video.directUrl || video.formats.length}
+          <p class="format-note">{t('audio.original')}</p>
         {:else}
           <p class="format-empty">{t('audio.empty')}</p>
         {/if}
@@ -199,6 +537,58 @@
       {/if}
     </div>
 
+    <section class="transcript-panel" aria-label={t('result.transcript')}>
+      <div class="description-head">
+        <strong>{t('result.transcript')}</strong>
+        <div class="description-actions">
+          {#if transcriptBusy}
+            <button class="link-btn" onclick={stopTranscript}>{t('result.cancelTranscript')}</button>
+          {:else}
+            <button class="link-btn" disabled={batchBusy} onclick={() => startTranscript()}>{t('result.transcribe')}</button>
+          {/if}
+          <button class="link-btn" disabled={!transcriptText} onclick={saveEditedTranscript}>{t('result.saveTranscript')}</button>
+          <button class="link-btn" disabled={!transcriptText} onclick={copyTranscript}>
+            <Icon name="content_copy" size={14} />
+            <span>{transcriptCopied ? t('common.copied') : t('result.copyTranscript')}</span>
+          </button>
+        </div>
+      </div>
+      <p class="format-note">{t('result.transcriptHint')}</p>
+      <div class="transcript-config">
+        <button class="link-btn" onclick={chooseWhisper}>{t('result.chooseEngine')}</button>
+        <span class="num">{whisperPath || '—'}</span>
+        <button class="link-btn" onclick={chooseModel}>{t('result.chooseModel')}</button>
+        <span class="num">{modelPath || '—'}</span>
+      </div>
+      {#if transcriptBusy}
+        <p class="description-empty" role="status">{whisperPreparing ? t('result.preparingWhisper') : t('result.transcribing')}</p>
+      {:else if transcriptError}
+        <p class="description-empty" role="alert">{transcriptError}</p>
+      {:else if transcriptText}
+        <textarea class="transcript-editor" bind:value={transcriptText} aria-label={t('result.transcript')}></textarea>
+      {:else}
+        <p class="description-empty">{t('result.noSpeech')}</p>
+      {/if}
+    </section>
+
+    <div class="bundle-action">
+      <button class="btn btn-primary btn-lg" disabled={batchBusy || transcriptBusy} onclick={() => downloadAll()}>
+        <Icon name="download" size={18} />
+        <span>{batchBusy ? t('result.downloadingAll') : t('result.downloadAll')}</span>
+      </button>
+      {#if batchBusy || Object.values(batchStatus).some((state) => state !== 'pending')}
+        <div class="bundle-status" aria-live="polite">
+          {#each assetKinds as kind}
+            <span>{kind === 'video' ? t('mode.video') : kind === 'audio' ? t('mode.audio') : kind === 'cover' ? t('result.saveCover') : kind === 'post' ? t('result.description') : t('result.transcript')}：{statusLabel(batchStatus[kind])}
+              {#if batchStatus[kind] === 'failed'}
+                <button class="link-btn" disabled={batchBusy || transcriptBusy} onclick={() => downloadAll(kind)}>{t('result.retryAsset')}</button>
+              {/if}
+            </span>
+          {/each}
+        </div>
+      {/if}
+    </div>
+
     <footer class="result-foot">
       {#if existing}
         <!--
@@ -216,7 +606,7 @@
             <Icon name="history" size={18} />
             <span>{t('result.openHistory')}</span>
           </button>
-          <button class="btn btn-primary btn-lg download-btn" disabled={!app.canDownload} onclick={() => app.addDownload()}>
+          <button class="btn btn-primary btn-lg download-btn" disabled={!app.canDownload || app.assetBusy} onclick={downloadSelected}>
             <Icon name="download" size={18} />
             <span>{t('format.download')}</span>
           </button>
@@ -226,7 +616,7 @@
           <span class="summary-label">{app.canDownload ? app.selectionSummary : app.selectionHint}</span>
           <span class="summary-path num">{t('format.downloadTo')} {app.settings.downloadDir}</span>
         </div>
-        <button class="btn btn-primary btn-lg download-btn" disabled={!app.canDownload} onclick={() => app.addDownload()}>
+        <button class="btn btn-primary btn-lg download-btn" disabled={!app.canDownload || app.assetBusy} onclick={downloadSelected}>
           <Icon name="download" size={18} />
           <span>{t('format.download')}</span>
         </button>
@@ -372,6 +762,39 @@
   }
   .link-btn:hover {
     text-decoration-color: currentColor;
+  }
+
+  .description-panel {
+    margin: 0 18px 16px;
+    padding: 12px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-control);
+    background: var(--paper-sunk);
+  }
+  .description-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--ink-strong);
+  }
+  .description-actions {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .description-head .link-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .description-content, .description-empty {
+    margin: 9px 0 0;
+    font-size: 12px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--color-on-surface-variant);
   }
 
   /* ---------- 模式切换 ---------- */
@@ -583,6 +1006,58 @@
     text-align: center;
     color: var(--color-on-surface-variant);
     font-size: 12px;
+  }
+
+  .transcript-panel {
+    margin: 0 18px 18px;
+    padding: 12px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-control);
+    background: var(--paper-sunk);
+  }
+  .transcript-editor {
+    display: block;
+    width: 100%;
+    min-height: 170px;
+    margin-top: 12px;
+    padding: 10px;
+    resize: vertical;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-control);
+    background: var(--paper-raised);
+    color: var(--ink-strong);
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.65;
+  }
+  .transcript-config {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px 12px;
+    align-items: center;
+    margin-top: 12px;
+    font-size: 11px;
+  }
+  .transcript-config .num {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-on-surface-variant);
+  }
+
+  .bundle-action {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 0 18px 16px;
+  }
+  .bundle-status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    font-size: 11px;
+    color: var(--color-on-surface-variant);
   }
 
   /* ---------- 底部 ---------- */

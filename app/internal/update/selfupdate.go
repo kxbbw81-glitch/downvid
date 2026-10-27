@@ -231,7 +231,7 @@ func CanSelfInstall(exePath string, writable func(string) bool) (bool, string) {
 		return false, "拿不到可执行文件路径"
 	}
 	// `go run` 的产物落在临时目录，不是真实安装
-	if strings.Contains(exePath, string(filepath.Separator)+"go-build") ||
+	if strings.Contains(strings.ReplaceAll(exePath, `\`, "/"), "/go-build") ||
 		strings.Contains(exePath, "___go_build") {
 		return false, "开发模式下不支持自动更新，请前往发布页下载"
 	}

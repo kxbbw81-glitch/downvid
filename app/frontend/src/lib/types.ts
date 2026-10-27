@@ -79,11 +79,14 @@ export interface SubtitleOption {
  * （平台名要翻译，后端给死文案就没法 i18n）。
  */
 export interface VideoInfo {
+  id?: string
   url: string
   platformId: PlatformId
   platformName: string
   host: string
   title: string
+  /** 作者发布的正文；与视频口播转写分开展示。 */
+  description?: string
   uploader: string
   duration: number
   thumbnail: string

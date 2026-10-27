@@ -192,6 +192,17 @@ func (a *App) buildArgs(opts DownloadRequest) []string {
 // 与 yt-dlp 路径共用的部分：进度事件名、`activeDownloads` 里的暂停句柄、
 // 历史记录的落盘时机。差异只在「谁来拉字节」。
 func (a *App) startDirectDownload(opts DownloadRequest) StartDownloadResult {
+	if opts.DownloadMode == "subtitle" {
+		return StartDownloadResult{OK: false, Error: "直链没有可下载的字幕，请先使用口播转写"}
+	}
+	ffmpegPath := ""
+	if opts.DownloadMode == "audio" {
+		var found bool
+		ffmpegPath, found = a.pathOf("ffmpeg")
+		if !found {
+			return StartDownloadResult{OK: false, Error: "提取视频原声需要 FFmpeg，请在「设置 → 运行依赖」中下载", MissingKind: "ffmpeg"}
+		}
+	}
 	client, err := netx.Client(a.currentProxy(), 0)
 	if err != nil {
 		// socks5 这类：如实告诉用户哪些功能用它、哪些不用。
@@ -210,6 +221,12 @@ func (a *App) startDirectDownload(opts DownloadRequest) StartDownloadResult {
 		outputDir = a.downloadsDir
 	}
 	outputPath := filepath.Join(outputDir, directFilename(template, opts))
+	// 直链只提供视频容器；音频先保存为原始媒体，再经 FFmpeg 真正提取。
+	// 源文件采用稳定路径，以便用户暂停后继续下载。
+	sourcePath := outputPath
+	if opts.DownloadMode == "audio" {
+		sourcePath += ".source.mp4"
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	a.mu.Lock()
@@ -244,7 +261,7 @@ func (a *App) startDirectDownload(opts DownloadRequest) StartDownloadResult {
 		res, err := (fetch.Direct{}).Download(ctx, fetch.DirectOptions{
 			CDNURL:      opts.DirectURL,
 			PageURL:     opts.URL,
-			OutputPath:  outputPath,
+			OutputPath:  sourcePath,
 			Connections: download.AccelerationConnections(a.acceleration()),
 			Client:      client,
 			OnProgress:  onProgress,
@@ -264,9 +281,45 @@ func (a *App) startDirectDownload(opts DownloadRequest) StartDownloadResult {
 			})
 			return
 		}
+		finalPath := res.Path
+		if opts.DownloadMode == "audio" {
+			a.emitProgress(DownloadProgress{
+				TaskID: opts.TaskID, URL: opts.URL, Status: "merging",
+				Percent: 99, Message: "正在提取原声",
+			})
+			converted := outputPath + ".converting.m4a"
+			_ = os.Remove(converted)
+			cmd := exec.CommandContext(ctx, ffmpegPath, "-nostdin", "-loglevel", "error",
+				"-i", res.Path, "-vn", "-c:a", "aac", "-b:a", "192k", converted)
+			out, convertErr := cmd.CombinedOutput()
+			if convertErr != nil {
+				_ = os.Remove(converted)
+				if ctx.Err() != nil {
+					a.emitProgress(DownloadProgress{
+						TaskID: opts.TaskID, URL: opts.URL, Status: "paused", FilePath: sourcePath,
+					})
+				} else {
+					a.emitProgress(DownloadProgress{
+						TaskID: opts.TaskID, URL: opts.URL, Status: "error",
+						Error: fmt.Sprintf("提取原声失败：%v %s", convertErr, strings.TrimSpace(string(out))),
+					})
+				}
+				return
+			}
+			if err := os.Rename(converted, outputPath); err != nil {
+				_ = os.Remove(converted)
+				a.emitProgress(DownloadProgress{
+					TaskID: opts.TaskID, URL: opts.URL, Status: "error",
+					Error: fmt.Sprintf("保存音频失败：%v", err),
+				})
+				return
+			}
+			_ = os.Remove(res.Path)
+			finalPath = outputPath
+		}
 		a.emitProgress(DownloadProgress{
 			TaskID: opts.TaskID, URL: opts.URL, Status: "completed",
-			Percent: 100, FilePath: res.Path,
+			Percent: 100, FilePath: finalPath,
 		})
 	}()
 
@@ -701,7 +754,13 @@ func cachedJSRuntime() jsruntime.Info {
 	return info
 }
 
-func (a *App) cookieArgs() []string { return nil }
+func (a *App) cookieArgs() []string {
+	st, err := a.settingsStore().Load()
+	if err == nil && st.CookieMode == "manual" && st.CookiesFile != "" {
+		return []string{"--cookies", st.CookiesFile}
+	}
+	return nil
+}
 
 // runSidecar 执行 Go 边车并返回 stdout。
 //

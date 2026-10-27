@@ -17,6 +17,7 @@
     "check:settings": "node scripts/check-settings-write.mjs"
   },
   "devDependencies": {
+    "@types/node": "24.13.4",
     "@material-symbols/font-400": "^0.48.0",
     "@sveltejs/vite-plugin-svelte": "^6.0.0",
     "@tailwindcss/vite": "^4.3.3",
