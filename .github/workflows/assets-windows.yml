@@ -39,8 +39,11 @@ jobs:
         working-directory: app/frontend
         run: |
           pnpm check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           pnpm test
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           pnpm build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Go 检查与测试
         working-directory: app
         shell: pwsh
@@ -51,6 +54,22 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           go test -shuffle=on -count=1 ./...
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: 安装真实音频测试依赖
+        shell: pwsh
+        run: |
+          $runtimeDir = Join-Path $env:RUNNER_TEMP 'assets-runtime'
+          Push-Location backend
+          go run ./cmd/downvid-deps fetch --managed-dir $runtimeDir --only ffmpeg --mirror github
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Pop-Location
+          $ffmpeg = Get-ChildItem $runtimeDir -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $ffmpeg) { throw 'FFmpeg 安装未产生可执行文件' }
+          "DOWNVID_FFMPEG=$($ffmpeg.FullName)" >> $env:GITHUB_ENV
+      - name: 真实媒体与首次安装集成验收
+        working-directory: app
+        env:
+          DOWNVID_ASSET_INTEGRATION: '1'
+        run: go test -run TestAssetsRealMediaIntegration -count=1 -v -timeout 15m .
       - name: 构建完整桌面程序
         shell: bash
         run: bash app/scripts/build.sh -platform windows/amd64

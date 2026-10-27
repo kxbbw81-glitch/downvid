@@ -5,6 +5,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
@@ -36,8 +37,12 @@ type WhisperSetup struct {
 	Error       string `json:"error,omitempty"`
 }
 
-func verifiedDownload(client *http.Client, url, destination, expected string, limit int64, sha256sum bool) error {
-	res, err := client.Get(url)
+func verifiedDownload(ctx context.Context, client *http.Client, url, destination, expected string, limit int64, sha256sum bool) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	res, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -140,9 +145,21 @@ func unpackWhisper(archive, target string) (string, error) {
 }
 
 // PrepareWhisper 首次使用时安装经校验的本地转写依赖。
-func (a *App) PrepareWhisper() WhisperSetup {
+func (a *App) PrepareWhisper(taskID string) WhisperSetup {
 	whisperInstallMu.Lock()
 	defer whisperInstallMu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if taskID != "" {
+		transcriptTasks.Lock()
+		if transcriptTasks.cancels[taskID] != nil {
+			transcriptTasks.Unlock()
+			return WhisperSetup{Error: "任务已经在进行"}
+		}
+		transcriptTasks.cancels[taskID] = cancel
+		transcriptTasks.Unlock()
+		defer func() { transcriptTasks.Lock(); delete(transcriptTasks.cancels, taskID); transcriptTasks.Unlock() }()
+	}
 	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
 		return WhisperSetup{Error: "当前平台请手动选择 whisper-cli 和多语言 ggml 模型"}
 	}
@@ -157,7 +174,7 @@ func (a *App) PrepareWhisper() WhisperSetup {
 	client.Timeout = 15 * time.Minute
 	model := filepath.Join(root, "ggml-base.bin")
 	if !fileExists(model) {
-		if err := verifiedDownload(client, whisperModelURL, model, whisperModelSHA1, 200<<20, false); err != nil {
+		if err := verifiedDownload(ctx, client, whisperModelURL, model, whisperModelSHA1, 200<<20, false); err != nil {
 			return WhisperSetup{Error: "下载多语言模型失败：" + err.Error()}
 		}
 	}
@@ -173,7 +190,7 @@ func (a *App) PrepareWhisper() WhisperSetup {
 	if binary == "" {
 		archive := filepath.Join(root, "whisper-b5454-x64.zip")
 		if !fileExists(archive) {
-			if err := verifiedDownload(client, whisperArchiveURL, archive, whisperArchiveSHA256, 32<<20, true); err != nil {
+			if err := verifiedDownload(ctx, client, whisperArchiveURL, archive, whisperArchiveSHA256, 32<<20, true); err != nil {
 				return WhisperSetup{Error: "下载识别程序失败：" + err.Error()}
 			}
 		}

@@ -12,6 +12,9 @@ importers:
         specifier: ^2.19.5
         version: 2.19.5(@internationalized/date@3.12.4)(svelte@5.57.2)
     devDependencies:
+      '@types/node':
+        specifier: 24.13.4
+        version: 24.13.4
       '@material-symbols/font-400':
         specifier: ^0.48.0
         version: 0.48.0
@@ -44,6 +47,12 @@ importers:
         version: 5.0.5(vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0))
 
 packages:
+
+  '@types/node@24.13.4':
+    resolution: {integrity: sha512-YJ7EqCstVTzIr0fMr7qul/977en+pQHrfmuKIo6Zr9i75Be21dr3MovcfvGtyvi2HAUrRerWps5sMO9I7WaxDw==}
+
+  undici-types@7.18.2:
+    resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
 
   '@esbuild/aix-ppc64@0.28.2':
     resolution: {integrity: sha512-XExcO+dvLKvVtNTibSTBej1NCAbaGhWn9Ww1ZPx80qsahhPFe/8jgWP0IchNe0F3HwkU7n8ejhH8bjonqht8mQ==}
@@ -925,6 +934,12 @@ packages:
     resolution: {integrity: sha512-msJxIvYDYcoNL+PJsu+7qmpDWsYmAxTY+2TNYXXF0hzBzBk0BMecOqDOG/EckUoKCuKwObfbugIl8QpqHDXeFA==}
 
 snapshots:
+
+  '@types/node@24.13.4':
+    dependencies:
+      undici-types: 7.18.2
+
+  undici-types@7.18.2: {}
 
   '@esbuild/aix-ppc64@0.28.2':
     optional: true

@@ -192,6 +192,9 @@ func TestBindingShouldOfferIssue(t *testing.T) {
 // 大小写错了同样会让数据「消失」（macOS 上大小写不敏感，Linux 上敏感），
 // 而这在任何测试里都看不出来——所以单独钉住。
 func TestResolveDataDirMatchesElectron(t *testing.T) {
+	previous := distribution
+	distribution = "upstream"
+	t.Cleanup(func() { distribution = previous })
 	got := resolveDataDir()
 	if got == "" {
 		t.Fatal("不该为空")

@@ -26,6 +26,7 @@
   let transcriptBusy = $state(false)
   let whisperPreparing = $state(false)
   let transcriptTaskID = ''
+  let transcriptCancelled = false
   let transcriptCopied = $state(false)
   let previousVideoURL = ''
   $effect(() => {
@@ -65,10 +66,13 @@
     transcriptBusy = true
     app.assetBusy = true
     transcriptError = ''
+    transcriptCancelled = false
+    transcriptTaskID = 'transcript-' + Date.now().toString(36)
     try {
       if (!whisperPath || !modelPath) {
         whisperPreparing = true
-        const setup = await prepareWhisper()
+        const setup = await prepareWhisper(transcriptTaskID)
+        if (transcriptCancelled) return false
         if (!setup.ok || !setup.whisperPath || !setup.modelPath) {
           transcriptError = setup.error || t('result.transcriptHint')
           return false
@@ -78,7 +82,7 @@
         localStorage.setItem('downvid.whisperPath', whisperPath)
         localStorage.setItem('downvid.modelPath', modelPath)
       }
-      transcriptTaskID = 'transcript-' + Date.now().toString(36)
+      if (transcriptCancelled) return false
       const result = await transcribe({
         taskId: transcriptTaskID,
         url: current.url,
@@ -110,6 +114,8 @@
   }
 
   async function stopTranscript(): Promise<void> {
+    transcriptCancelled = true
+    transcriptError = t('result.transcriptCancelled')
     if (transcriptTaskID) await cancelTranscript(transcriptTaskID)
   }
 
@@ -172,31 +178,35 @@
 
   async function downloadMode(mode: 'video' | 'audio', currentURL: string): Promise<string> {
     if (video?.url !== currentURL) return ''
-    const prior = app.history.find((item) => item.url === currentURL && item.mode === mode && item.fileExists)
-    if (prior) return prior.filePath
     const known = new Set(app.tasks.map((item) => item.id))
     if (mode === 'audio' && video?.audios.length) {
       app.selectAudio(video.audios[0].id)
     } else {
       app.setMode(mode)
     }
+    // 历史接口没有保存 mode；不要把音频历史误当成已下载的视频。
+    const prior = app.tasks.find((item) => item.url === currentURL && item.mode === mode && item.status === 'completed'
+      && (mode !== 'video' || item.formatId === app.selectedFormatId))
+    if (prior) return prior.filePath
+    if (mode === 'video' && app.alreadyDownloaded) return app.alreadyDownloaded.filePath
     await app.addDownload()
     const task = app.tasks.find((item) => !known.has(item.id) && item.url === currentURL && item.mode === mode)
     return task ? waitForTask(task.id) : ''
   }
 
-  async function downloadAll(): Promise<void> {
+  async function downloadAll(only?: AssetKind): Promise<void> {
     const current = video
     if (!current || batchBusy || transcriptBusy) return
     batchBusy = true
     app.assetBusy = true
     const outputDir = app.settings.downloadDir
-    batchStatus = { video: 'pending', audio: 'pending', cover: 'pending', post: 'pending', transcript: 'pending' }
+    if (!only) batchStatus = { video: 'pending', audio: 'pending', cover: 'pending', post: 'pending', transcript: 'pending' }
     const failures: string[] = []
     const originalMode = app.mode
     const assetID = current.id || current.url
-    let sourceFile = ''
+    let sourceFile = app.tasks.find((item) => item.url === current.url && item.mode === 'video' && item.status === 'completed')?.filePath || ''
     try {
+      if (!only || only === 'video') {
       if (current.formats.length) {
         setAssetState('video', 'processing')
         sourceFile = await downloadMode('video', current.url)
@@ -205,8 +215,10 @@
       } else {
         setAssetState('video', 'unavailable')
       }
+      }
 
       if (video?.url !== current.url) throw new Error('当前解析链接已经改变')
+      if (!only || only === 'audio') {
       setAssetState('audio', 'processing')
       if (sourceFile) {
         const audio = await extractAudio(sourceFile, outputDir, assetID)
@@ -220,7 +232,9 @@
       } else {
         setAssetState('audio', 'unavailable')
       }
+      }
 
+      if (!only || only === 'cover') {
       if (current.thumbnail) {
         setAssetState('cover', 'processing')
         const dataURL = current.thumbnail.startsWith('data:')
@@ -231,7 +245,9 @@
       } else {
         setAssetState('cover', 'unavailable')
       }
+      }
 
+      if (!only || only === 'post') {
       if (current.description) {
         setAssetState('post', 'processing')
         const post = await saveText(current.description, outputDir, assetID, 'post')
@@ -240,11 +256,14 @@
       } else {
         setAssetState('post', 'unavailable')
       }
+      }
 
+      if (!only || only === 'transcript') {
       setAssetState('transcript', 'processing')
       const speech = await startTranscript(sourceFile, outputDir)
       setAssetState('transcript', speech ? 'done' : 'failed')
       if (!speech) failures.push(t('result.transcript'))
+      }
       app.toast(failures.length
         ? t('result.batchPartial', { items: failures.join('、') })
         : t('result.batchCompleted'), failures.length ? 'error' : 'success')
@@ -507,7 +526,7 @@
         <strong>{t('result.transcript')}</strong>
         <div class="description-actions">
           {#if transcriptBusy}
-            <button class="link-btn" disabled={whisperPreparing} onclick={stopTranscript}>{t('result.cancelTranscript')}</button>
+            <button class="link-btn" onclick={stopTranscript}>{t('result.cancelTranscript')}</button>
           {:else}
             <button class="link-btn" disabled={batchBusy} onclick={() => startTranscript()}>{t('result.transcribe')}</button>
           {/if}
@@ -537,14 +556,18 @@
     </section>
 
     <div class="bundle-action">
-      <button class="btn btn-primary btn-lg" disabled={batchBusy || transcriptBusy} onclick={downloadAll}>
+      <button class="btn btn-primary btn-lg" disabled={batchBusy || transcriptBusy} onclick={() => downloadAll()}>
         <Icon name="download" size={18} />
         <span>{batchBusy ? t('result.downloadingAll') : t('result.downloadAll')}</span>
       </button>
       {#if batchBusy || Object.values(batchStatus).some((state) => state !== 'pending')}
         <div class="bundle-status" aria-live="polite">
           {#each assetKinds as kind}
-            <span>{kind === 'video' ? t('mode.video') : kind === 'audio' ? t('mode.audio') : kind === 'cover' ? t('result.saveCover') : kind === 'post' ? t('result.description') : t('result.transcript')}：{statusLabel(batchStatus[kind])}</span>
+            <span>{kind === 'video' ? t('mode.video') : kind === 'audio' ? t('mode.audio') : kind === 'cover' ? t('result.saveCover') : kind === 'post' ? t('result.description') : t('result.transcript')}：{statusLabel(batchStatus[kind])}
+              {#if batchStatus[kind] === 'failed'}
+                <button class="link-btn" disabled={batchBusy || transcriptBusy} onclick={() => downloadAll(kind)}>{t('result.retryAsset')}</button>
+              {/if}
+            </span>
           {/each}
         </div>
       {/if}

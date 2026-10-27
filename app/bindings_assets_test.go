@@ -38,3 +38,19 @@ func TestSaveTextDoesNotConfuseRetranscriptionWithOldFile(t *testing.T) {
 		t.Fatalf("新文件内容错误：%q, %v", content, err)
 	}
 }
+
+func TestForkKeepsDataAndUpdatesSeparate(t *testing.T) {
+	if distribution != "mediaharvest" {
+		t.Skip("仅检查素材增强版分发")
+	}
+	if filepath.Base(resolveDataDir()) == "downvid" {
+		t.Fatal("增强版不应修改官方用户数据")
+	}
+	a := NewApp()
+	if result := a.DownloadUpdate("1.5.0", "github"); result.OK || !strings.Contains(result.Error, "官方更新") {
+		t.Fatalf("不应下载覆盖增强功能的官方更新：%+v", result)
+	}
+	if result := a.InstallUpdate(); result.OK || !strings.Contains(result.Error, "官方更新") {
+		t.Fatalf("不应安装官方更新：%+v", result)
+	}
+}

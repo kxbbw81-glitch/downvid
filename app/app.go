@@ -286,7 +286,7 @@ func (a *App) ShouldOfferIssue(kind string) bool {
 // **不抛错**：全挂时 `Release` 为 nil + 轨迹，前端据此显示人话提示。
 func (a *App) CheckUpdate(source string) map[string]any {
 	if distribution == "mediaharvest" {
-		return map[string]any{"version": version, "architecture": string(update.CurrentArchitecture), "hasUpdate": false, "release": nil, "summary": "非官方素材增强版，请从 kxbbw81-glitch/downvid 下载更新"}
+		return map[string]any{"version": version, "architecture": string(update.CurrentArchitecture), "hasUpdate": false, "release": nil, "migration": update.MigrationHint{Reason: "非官方素材增强版使用独立分发"}, "summary": "非官方素材增强版，请从 kxbbw81-glitch/downvid 下载更新"}
 	}
 	result := update.LookupLatestRelease(update.LookupOptions{
 		Source:    update.NormalizeSource(source),
