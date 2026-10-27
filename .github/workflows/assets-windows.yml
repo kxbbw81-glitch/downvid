@@ -2,8 +2,7 @@ name: 素材完整版 Windows 验收
 on:
   push:
     branches: [feat/asset-transcript-workflow]
-  pull_request:
-    paths: ['app/**', 'scripts/test-assets*', '.github/workflows/assets-windows.yml']
+    paths: ['app/**', 'backend/**', 'scripts/**', '.github/workflows/assets-windows.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -73,7 +72,13 @@ jobs:
       - name: 构建完整桌面程序
         shell: bash
         run: bash app/scripts/build.sh -platform windows/amd64
+      - name: 整理独立程序包
+        shell: pwsh
+        run: |
+          Move-Item -LiteralPath app/build/bin/downvid.exe -Destination app/build/bin/MediaHarvest.exe
+          Copy-Item -LiteralPath docs/asset-transcript-workflow.md -Destination app/build/bin/README.md
       - name: 保存测试安装产物
+        # 产物包含独立程序及首次使用说明，不会发布 Release。
         uses: actions/upload-artifact@v6
         with:
           name: MediaHarvest-Wails-Windows-x64

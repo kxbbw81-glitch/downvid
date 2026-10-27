@@ -10,8 +10,8 @@
   },
   "totals": {
     "upstreamSignificantLines": 2707,
-    "retainedVerbatimLines": 1241,
-    "retainedPct": 45.8,
+    "retainedVerbatimLines": 1242,
+    "retainedPct": 45.9,
     "registryFiles": 32
   },
   "files": {
@@ -24,8 +24,8 @@
       "retainedElsewhere": 47.1,
       "homes": [
         "src/env.d.ts(15)",
-        "app/frontend/src/lib/backend.ts(3)",
-        "app/frontend/src/lib/store.svelte.ts(2)"
+        "app/frontend/src/lib/backend.ts(4)",
+        "app/frontend/src/lib/snapshot.ts(2)"
       ]
     },
     "electron/ipc/download.ts": {
@@ -245,6 +245,7 @@
       "upstreamPct": 0,
       "retainedElsewhere": 1.4,
       "homes": [
+        "app/frontend/postcss.config.js(1)",
         "postcss.config.js(1)"
       ]
     },

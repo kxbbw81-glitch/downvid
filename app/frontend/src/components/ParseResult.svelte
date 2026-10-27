@@ -83,6 +83,7 @@
         localStorage.setItem('downvid.modelPath', modelPath)
       }
       if (transcriptCancelled) return false
+      whisperPreparing = false
       const result = await transcribe({
         taskId: transcriptTaskID,
         url: current.url,
@@ -310,6 +311,21 @@
     const dataURL = source.startsWith('data:') ? source : await fetchImage(source, video.url)
     const result = await saveCover(dataURL, app.settings.downloadDir, video.id || video.url)
     app.toast(result.ok ? t('result.saved', { path: result.path || '' }) : result.error || t('error.saveFailed'), result.ok ? 'success' : 'error')
+  }
+
+  async function downloadSelected(): Promise<void> {
+    if (!video || app.assetBusy) return
+    const source = app.mode === 'audio' ? app.tasks.find((item) =>
+      item.url === video?.url && item.mode === 'video' && item.status === 'completed')?.filePath : ''
+    if (!source) { await app.addDownload(); return }
+    const current = video
+    const outputDir = app.settings.downloadDir
+    app.assetBusy = true
+    try {
+      const result = await extractAudio(source, outputDir, current.id || current.url)
+      setAssetState('audio', result.ok ? 'done' : 'failed')
+      app.toast(result.ok ? t('result.saved', { path: result.path || '' }) : result.error || t('error.saveFailed'), result.ok ? 'success' : 'error')
+    } finally { app.assetBusy = false }
   }
 
   function toSettings(section: 'network'): void {
@@ -590,7 +606,7 @@
             <Icon name="history" size={18} />
             <span>{t('result.openHistory')}</span>
           </button>
-          <button class="btn btn-primary btn-lg download-btn" disabled={!app.canDownload} onclick={() => app.addDownload()}>
+          <button class="btn btn-primary btn-lg download-btn" disabled={!app.canDownload || app.assetBusy} onclick={downloadSelected}>
             <Icon name="download" size={18} />
             <span>{t('format.download')}</span>
           </button>
@@ -600,7 +616,7 @@
           <span class="summary-label">{app.canDownload ? app.selectionSummary : app.selectionHint}</span>
           <span class="summary-path num">{t('format.downloadTo')} {app.settings.downloadDir}</span>
         </div>
-        <button class="btn btn-primary btn-lg download-btn" disabled={!app.canDownload} onclick={() => app.addDownload()}>
+        <button class="btn btn-primary btn-lg download-btn" disabled={!app.canDownload || app.assetBusy} onclick={downloadSelected}>
           <Icon name="download" size={18} />
           <span>{t('format.download')}</span>
         </button>
